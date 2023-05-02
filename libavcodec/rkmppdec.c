@@ -57,8 +57,6 @@ typedef struct {
     MppApi *mpi;
     MppBufferGroup frame_group;
 
-    int8_t eos;
-
     AVPacket packet;
     AVBufferRef *frames_ref;
     AVBufferRef *device_ref;
@@ -585,10 +583,6 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     MppBuffer buffer = NULL;
     int ret, mode, latency;
 
-    // should not provide any frame after EOS
-    if (decoder->eos)
-        return AVERROR_EOF;
-
     decoder->mpi->control(decoder->ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&timeout);
 
     ret = decoder->mpi->decode_get_frame(decoder->ctx, &mppframe);
@@ -604,7 +598,6 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
 
     if (mpp_frame_get_eos(mppframe)) {
         av_log(avctx, AV_LOG_DEBUG, "Received a EOS frame.\n");
-        decoder->eos = 1;
         ret = AVERROR_EOF;
         goto fail;
     }
@@ -658,7 +651,7 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
         hwframes->width     = avctx->width;
         hwframes->height    = avctx->height;
         ret = av_hwframe_ctx_init(decoder->frames_ref);
-        if (!ret)
+        if (!ret) // FIX ME!
             ret = AVERROR(EAGAIN);
 
         goto fail;
@@ -777,52 +770,52 @@ static int rkmpp_send_eos(AVCodecContext *avctx)
 
 static int rkmpp_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
+    AVCodecInternal *avci = avctx->internal;
     RKMPPDecodeContext *rk_context = avctx->priv_data;
     RKMPPDecoder *decoder = (RKMPPDecoder *)rk_context->decoder_ref->data;
     AVPacket *packet = &decoder->packet;
-    int ret;
-    int gettimeout = MPP_TIMEOUT_NON_BLOCK;;
-
-    if (decoder->eos)
-        return AVERROR_EOF;
+    int ret_send, ret_get;
 
     // get packet if not already available from previous iteration
-    if (!packet->size){
-        ret = ff_decode_get_packet(avctx, packet);
-        if (ret == AVERROR_EOF) {
-            av_log(avctx, AV_LOG_DEBUG, "Draining.\n");
-            // send EOS and start draining
-            rkmpp_send_eos(avctx);
-            // we can get all the decoder backlog blocking here
-            gettimeout = MPP_TIMEOUT_BLOCK;
+    if (!avci->draining){
+        if(!packet->size){
+            switch(ff_decode_get_packet(avctx, packet)){
+                case AVERROR_EOF:
+                    av_log(avctx, AV_LOG_DEBUG, "Draining.\n");
+                    return rkmpp_send_eos(avctx);
+                case AVERROR(EAGAIN):
+                    av_log(avctx, AV_LOG_DEBUG, "Can't get packet retrying.\n");
+                    return AVERROR(EAGAIN);
+                }
         }
-    }
 
-    // when there are packets available to push to decoder
-    if (packet->size) {
-        ret = rkmpp_send_packet(avctx, packet);
-        if (ret == AVERROR(EAGAIN)) {
-            // decoder input buffer is full, no need to poll packets unless we receive a frame
-            gettimeout = MPP_TIMEOUT_BLOCK;
-        } else if (ret < 0) {
-            // error handling
-            av_log(avctx, AV_LOG_ERROR, "Failed to send data (code = %d)\n", ret);
-            return ret;
-        } else {
-            // successful decoder write
+sendpacket:
+        // there is definitely a packet to send to decoder here
+        ret_send = rkmpp_send_packet(avctx, packet);
+        if (ret_send == 0){
+            // send successful, continue until decoder input buffer is full
             av_packet_unref(packet);
+            return AVERROR(EAGAIN);
+        } else if (ret_send < 0 && ret_send != AVERROR(EAGAIN)) {
+            // something went wrong, raise error
+            av_log(avctx, AV_LOG_ERROR, "Failed to send data (code = %d)\n", ret_send);
+            return ret_send;
         }
     }
 
-    // always try to consume decoder because it is more likely to be full rather than the packet inputs
-    // decoder is the bottleneck here
-     ret = rkmpp_get_frame(avctx, frame, gettimeout);
-    if (ret == AVERROR_EOF) {
-        av_log(avctx, AV_LOG_DEBUG, "End of Stream.\n");
-        return rkmpp_get_frame(avctx, frame, MPP_TIMEOUT_BLOCK);
-    }
+    // were here only when draining and buffer is full
+    ret_get = rkmpp_get_frame(avctx, frame, MPP_TIMEOUT_BLOCK);
 
-    return ret;
+    if (ret_get == AVERROR_EOF){
+        av_log(avctx, AV_LOG_DEBUG, "Decoder is at EOS.\n");
+    // this is not likely but lets handle it in case synchronization issues of mpp
+    } else if (ret_get == AVERROR(EAGAIN) && ret_send == AVERROR(EAGAIN))
+        goto sendpacket;
+    // only for logging
+    else if (ret_get < 0 && ret_get != AVERROR(EAGAIN)) // FIXME
+        av_log(avctx, AV_LOG_ERROR, "Failed to get frame (code = %d)\n", ret_get);
+
+   return ret_get;
 }
 
 static void rkmpp_flush(AVCodecContext *avctx)
@@ -834,7 +827,6 @@ static void rkmpp_flush(AVCodecContext *avctx)
 
     decoder->mpi->reset(decoder->ctx);
 
-    decoder->eos = 0;
     decoder->norga = 0;
 
     decoder->last_frame_time = decoder->frames = 0;
