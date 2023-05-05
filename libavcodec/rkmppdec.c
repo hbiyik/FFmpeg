@@ -260,15 +260,15 @@ static int rkmpp_rga_convert_buf(AVCodecContext *avctx, AVFrame *frame, MppFrame
 
         src += hstride * vstride;
         if(decoder->rga_informat == RGA_FORMAT_YCbCr_422_SP){
-        	/* In case the input format has 4:2:2 UV planes, it will have double the size of 4:2:0 UV Planes
-        	 * Therefore we scale them to the half the size to the unused FFbuffer's Y Plane (We are using MPP 's Y)
-        	 * Then we convert to Planar in the next step. Normally it should be possible to this in 1 step
-        	 * But i can not find a way to do it in 1 step using libyuv. But thats fine enough
-        	 */
-			UVScale(src, hstride, frame->width, frame->height,
-					frame->buf[0]->data, hstride,
-					(frame->width + 1) >> 1, (frame->height + 1) >> 1, kFilterNone);
-			src = frame->buf[0]->data;
+            /* In case the input format has 4:2:2 UV planes, it will have double the size of 4:2:0 UV Planes
+             * Therefore we scale them to the half the size to the unused FFbuffer's Y Plane (We are using MPP 's Y)
+             * Then we convert to Planar in the next step. Normally it should be possible to this in 1 step
+             * But i can not find a way to do it in 1 step using libyuv. But thats fine enough
+             */
+            UVScale(src, hstride, frame->width, frame->height,
+                    frame->buf[0]->data, hstride,
+                    (frame->width + 1) >> 1, (frame->height + 1) >> 1, kFilterNone);
+            src = frame->buf[0]->data;
         }
         SplitUVPlane(src, hstride, frame->data[1], frame->linesize[1], frame->data[2], frame->linesize[2],
                 (frame->width + 1) >> 1, (frame->height + 1) >> 1);
@@ -353,14 +353,14 @@ static int rkmpp_init_decoder(AVCodecContext *avctx)
     env = getenv("FFMPEG_RKMPP_PIXFMT");
     if(env != NULL){
         if(!strcmp(env, "YUV420P"))
-        	avctx->pix_fmt = AV_PIX_FMT_YUV420P;
+            avctx->pix_fmt = AV_PIX_FMT_YUV420P;
         else if (!strcmp(env, "NV12"))
-        	avctx->pix_fmt = AV_PIX_FMT_NV12;
-    	else if(!strcmp(env, "DRMPRIME"))
-    		avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
+            avctx->pix_fmt = AV_PIX_FMT_NV12;
+        else if(!strcmp(env, "DRMPRIME"))
+            avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
         else if(!strcmp(env, "YUV420PSOFT")){
-           	avctx->pix_fmt = AV_PIX_FMT_YUV420P;
-           	decoder->norga = 1;
+               avctx->pix_fmt = AV_PIX_FMT_YUV420P;
+               decoder->norga = 1;
         }
     }
 
@@ -420,21 +420,21 @@ static uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency)
     clock_gettime(CLOCK_MONOTONIC, &tv);
     curr_time = tv.tv_sec * 10e5 + tv.tv_nsec / 10e2;
     if (latency == -1){
-		latency = decoder->last_frame_time ? curr_time - decoder->last_frame_time : 0;
-		decoder->last_frame_time = curr_time;
-		decoder->latencies[++decoder->frames % FPS_FRAME_MACD] = latency;
-		return latency;
+        latency = decoder->last_frame_time ? curr_time - decoder->last_frame_time : 0;
+        decoder->last_frame_time = curr_time;
+        decoder->latencies[++decoder->frames % FPS_FRAME_MACD] = latency;
+        return latency;
     } else if (latency == 0 || decoder->frames < FPS_FRAME_MACD) {
-    	fps = -1.0f;
+        fps = -1.0f;
     } else {
-	   for(int i = 0; i < FPS_FRAME_MACD; i++) {
-		  fps += decoder->latencies[i];
-	   }
-    	fps = FPS_FRAME_MACD * 1000000.0f / fps;
+       for(int i = 0; i < FPS_FRAME_MACD; i++) {
+          fps += decoder->latencies[i];
+       }
+        fps = FPS_FRAME_MACD * 1000000.0f / fps;
     }
-	av_log(avctx, AV_LOG_INFO,
-		   "[FFMPEG RKMPP] FPS(MACD%d): %6.1f || Frames: %" PRIu64 " || Latency: %" PRIu64 "us || Buffer Delay %" PRIu64 "us\n",
-		   FPS_FRAME_MACD, fps, decoder->frames, latency, (uint64_t)(curr_time - decoder->last_frame_time));
+    av_log(avctx, AV_LOG_INFO,
+           "[FFMPEG RKMPP] FPS(MACD%d): %6.1f || Frames: %" PRIu64 " || Latency: %" PRIu64 "us || Buffer Delay %" PRIu64 "us\n",
+           FPS_FRAME_MACD, fps, decoder->frames, latency, (uint64_t)(curr_time - decoder->last_frame_time));
 
     return 0;
 }
@@ -565,12 +565,12 @@ static int set_buffer_callback(RKMPPDecoder *decoder, AVCodecContext *avctx){
             break;
         }
         if(decoder->rga_informat){
-			decoder->buffer_callback = rkmpp_rga_convert_buf;
-			if(decoder->norga || decoder->rga_fd < 0)
-				av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV12->YUV420P conversion through libyuv.\n");
-			else
-				av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV12->YUV420P conversion through RGA2.\n");
-			return 0;
+            decoder->buffer_callback = rkmpp_rga_convert_buf;
+            if(decoder->norga || decoder->rga_fd < 0)
+                av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV12->YUV420P conversion through libyuv.\n");
+            else
+                av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV12->YUV420P conversion through RGA2.\n");
+            return 0;
         }
     }
     av_log(avctx, AV_LOG_ERROR, "Unknown MPP format:%d and AVFormat:%d.\n", decoder->mpp_format, avctx->pix_fmt);
@@ -678,8 +678,8 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     latency = rkmpp_update_latency(avctx, -1);
 
     if(!decoder->buffer_callback){
-    	ret = AVERROR_UNKNOWN;
-    	av_log(avctx, AV_LOG_ERROR, "Decoder can't set output for MPP format:%d and AVFormat:%d.\n", decoder->mpp_format, avctx->pix_fmt);
+        ret = AVERROR_UNKNOWN;
+        av_log(avctx, AV_LOG_ERROR, "Decoder can't set output for MPP format:%d and AVFormat:%d.\n", decoder->mpp_format, avctx->pix_fmt);
         goto fail;
     }
 
@@ -706,8 +706,8 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     // when mpp can not determine the color space, it returns reserved (0) value
     // firefox does not understand this and instead expect unspecified (2) values
     frame->color_primaries  = frame->color_primaries == AVCOL_PRI_RESERVED0 ? AVCOL_PRI_UNSPECIFIED : frame->color_primaries;
-    frame->color_trc		= frame->color_trc == AVCOL_TRC_RESERVED0 ? AVCOL_TRC_UNSPECIFIED : frame->color_trc;
-    frame->colorspace		= frame->colorspace == AVCOL_SPC_RGB ? AVCOL_SPC_UNSPECIFIED: frame->color_trc;
+    frame->color_trc        = frame->color_trc == AVCOL_TRC_RESERVED0 ? AVCOL_TRC_UNSPECIFIED : frame->color_trc;
+    frame->colorspace        = frame->colorspace == AVCOL_SPC_RGB ? AVCOL_SPC_UNSPECIFIED: frame->color_trc;
 
     mode = mpp_frame_get_mode(mppframe);
     frame->interlaced_frame = ((mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_DEINTERLACED);
@@ -864,7 +864,7 @@ static void rkmpp_flush(AVCodecContext *avctx)
         .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING | AV_CODEC_CAP_HARDWARE, \
         .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
                                                          AV_PIX_FMT_YUV420P, \
-        												 AV_PIX_FMT_NV12, \
+                                                         AV_PIX_FMT_NV12, \
                                                          AV_PIX_FMT_NONE}, \
         .hw_configs     = (const AVCodecHWConfigInternal *const []) { HW_CONFIG_INTERNAL(DRM_PRIME), \
                                                                       HW_CONFIG_INTERNAL(NV12), \
