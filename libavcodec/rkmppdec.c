@@ -162,11 +162,7 @@ static void rkmpp_release_buf(void *opaque, uint8_t *data)
 
 static int rkmpp_set_nv12_buf(AVCodecContext *avctx, AVFrame *frame, MppFrame mppframe)
 {
-    RKMPPDecodeContext *rk_context = avctx->priv_data;
-    RKMPPDecoder *decoder = (RKMPPDecoder *)rk_context->decoder_ref->data;
-
     MppBuffer buffer = mpp_frame_get_buffer(mppframe);
-    int width = mpp_frame_get_width(mppframe);
     int hstride = mpp_frame_get_hor_stride(mppframe);
     int vstride = mpp_frame_get_ver_stride(mppframe);
 
