@@ -690,7 +690,6 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     frame->width            = mpp_frame_get_width(mppframe);
     frame->height           = mpp_frame_get_height(mppframe);
     frame->pts              = mpp_frame_get_pts(mppframe);
-    frame->reordered_opaque = frame->pts;
     frame->color_range      = mpp_frame_get_color_range(mppframe);
     frame->color_primaries  = mpp_frame_get_color_primaries(mppframe);
     frame->color_trc        = mpp_frame_get_color_trc(mppframe);
@@ -721,9 +720,6 @@ static int rkmpp_send_packet(AVCodecContext *avctx, AVPacket *packet)
     MppPacket mpkt;
     int64_t pts = packet->pts;
     int ret;
-
-    if (!pts || pts == AV_NOPTS_VALUE)
-        pts = avctx->reordered_opaque;
 
     ret = mpp_packet_init(&mpkt, packet->data, packet->size);
     if (ret != MPP_OK) {
