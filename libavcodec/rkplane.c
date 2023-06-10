@@ -45,7 +45,7 @@
 #include "libyuv/scale.h"
 
 
-#define AV_VSTRIDE(AVFRAME) (AVFRAME->buf[0] && AVFRAME->buf[1] ? AVFRAME->buf[0]->size / AVFRAME->linesize[0] : (AVFRAME->data[1] - AVFRAME->data[0]) / AVFRAME->linesize[0])
+#define AV_VSTRIDE(AVFRAME) (FFALIGN(AVFRAME->buf[0] && AVFRAME->buf[1] ? AVFRAME->buf[0]->size / AVFRAME->linesize[0] : (AVFRAME->data[1] - AVFRAME->data[0]) / AVFRAME->linesize[0], 16))
 
 static int rga_scale(uint64_t rga_fd,
         uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height, uint16_t src_hstride, uint16_t src_vstride,
@@ -85,11 +85,10 @@ static int rga_scale(uint64_t rga_fd,
     return ioctl(rga_fd, RGA_BLIT_SYNC, &req);
 }
 
-static MppFrame avframe_to_mppframe(AVCodecContext *avctx, AVFrame *frame, MppBufferGroup buffer_group){
+static MppFrame avframe_to_mppframe(AVCodecContext *avctx, AVFrame *frame, MppBufferGroup buffer_group, int rga_format, int copy){
     MppFrame mppframe = NULL;
     MppBuffer mppbuffer = NULL;
-    int ret;
-    int size=0, ysize=0;
+    int ysize, size, ret, hstride, vstride;
 
     ret = mpp_frame_init(&mppframe);
     if (ret) {
@@ -99,13 +98,16 @@ static MppFrame avframe_to_mppframe(AVCodecContext *avctx, AVFrame *frame, MppBu
 
      mpp_frame_set_width(mppframe, frame->width);
      mpp_frame_set_height(mppframe, frame->height);
-     mpp_frame_set_hor_stride(mppframe, frame->linesize[0]);
-     mpp_frame_set_ver_stride(mppframe, AV_VSTRIDE(frame));
 
-     for (int i=0; i < 3; i++){
-         if(frame->buf[i])
-             size += frame->buf[i]->size;
+     hstride = FFALIGN(frame->width, RKMPP_STRIDE_ALIGN);
+     if(rga_format == RGA_FORMAT_YCbCr_420_SP || RGA_FORMAT_YCbCr_420_P){
+         vstride = FFALIGN(frame->height, RKMPP_STRIDE_ALIGN);
+         ysize = hstride * vstride;
+         size = ysize * 3 / 2;
      }
+
+     mpp_frame_set_hor_stride(mppframe, hstride);
+     mpp_frame_set_ver_stride(mppframe, vstride);
 
      ret = mpp_buffer_get(buffer_group, &mppbuffer, size);
      if (ret) {
@@ -116,6 +118,16 @@ static MppFrame avframe_to_mppframe(AVCodecContext *avctx, AVFrame *frame, MppBu
      mpp_frame_set_buffer(mppframe, mppbuffer);
      mpp_frame_set_buf_size(mppframe, size);
      mpp_buffer_put(mppbuffer);
+     if(copy){
+         if (rga_format == RGA_FORMAT_YCbCr_420_SP){
+             mpp_buffer_write(mppbuffer, 0, frame->data[0], frame->buf[0]->size);
+             mpp_buffer_write(mppbuffer, ysize, frame->data[1], frame->buf[1]->size);
+         } else if (rga_format == RGA_FORMAT_YCbCr_420_P){
+             mpp_buffer_write(mppbuffer, 0, frame->data[0], frame->buf[0]->size);
+             mpp_buffer_write(mppbuffer, ysize, frame->data[1], frame->buf[1]->size);
+             mpp_buffer_write(mppbuffer, ysize * 5 / 4, frame->data[2], frame->buf[2]->size);
+         }
+     }
 
      return mppframe;
 
@@ -156,24 +168,11 @@ static int rga_convert_av_mpp(AVCodecContext *avctx, AVFrame *frame, MppFrame mp
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
 
     if (!codec->norga && codec->rga_fd >= 0){
-        MppFrame in_mppframe = avframe_to_mppframe(avctx, frame, codec->buffer_group);
-        MppBuffer in_mppbuffer = NULL;
-        int ret, offset = 0;
-        if (!in_mppframe)
-            goto clean;
-        in_mppbuffer = mpp_frame_get_buffer(in_mppframe);
-        // copy the normal buffer to mpp buffer. This is necessary for RGA
-        // we can not use avframe always since each plane might have different non continuous buffer
-        for (int i=0; i < 3; i++){
-            // FIXME: does data[n] always point to buf[n]?
-            if(frame->buf[i]){
-                mpp_buffer_write(in_mppbuffer, offset, frame->data[i], frame->buf[i]->size);
-                offset += frame->buf[i]->size;
-            }
-        }
+        MppFrame in_mppframe = avframe_to_mppframe(avctx, frame, codec->buffer_group, rga_informat, 1);
+        int ret;
 
         ret = rga_scale(codec->rga_fd,
-                mpp_buffer_get_fd(in_mppbuffer), 0,
+                mpp_buffer_get_fd(mpp_frame_get_buffer(in_mppframe)), 0,
                 mpp_frame_get_width(in_mppframe), mpp_frame_get_height(in_mppframe),
                 mpp_frame_get_hor_stride(in_mppframe),  mpp_frame_get_ver_stride(in_mppframe),
                 mpp_buffer_get_fd(mpp_frame_get_buffer(mppframe)), 0,
@@ -229,7 +228,7 @@ int mpp_nv15_av_yuv420p(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame
     if(!frame->buf[0])
         ff_get_buffer(avctx, frame, 0);
 
-    nv12frame = avframe_to_mppframe(avctx, frame, codec->buffer_group);
+    nv12frame = avframe_to_mppframe(avctx, frame, codec->buffer_group, RGA_FORMAT_YCbCr_420_SP, 0);
     // rga1 which supports yuv420P output does not support nv15 input
     // therefore this first converts NV15->NV12 with rga2 than NV12 -> yuv420P with rga1
     ret = rga_scale(codec->rga_fd,
@@ -343,7 +342,7 @@ int mpp_nv16_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
 MppFrame av_yuv420p_mpp_nv12(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    MppFrame out_mppframe = avframe_to_mppframe(avctx, frame, codec->buffer_group);
+    MppFrame out_mppframe = avframe_to_mppframe(avctx, frame, codec->buffer_group, RGA_FORMAT_YCbCr_420_SP, 0);
     if(rga_convert_av_mpp(avctx, frame, out_mppframe, RGA_FORMAT_YCbCr_420_P, RGA_FORMAT_YCbCr_420_SP)){
             MppBuffer out_buffer = mpp_frame_get_buffer(out_mppframe);
             int planesize = mpp_frame_get_hor_stride(out_mppframe) * mpp_frame_get_ver_stride(out_mppframe);
@@ -362,16 +361,6 @@ MppFrame av_yuv420p_mpp_nv12(AVCodecContext *avctx, AVFrame *frame){
 MppFrame av_nv12_mpp_nv12(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    MppFrame mppframe = avframe_to_mppframe(avctx, frame, codec->buffer_group);
-    MppBuffer mppbuffer = mpp_frame_get_buffer(mppframe);
-    int offset = 0;
-
-    for (int i=0; i < 3; i++){
-        if(frame->buf[i]){
-            mpp_buffer_write(mppbuffer, offset, frame->data[i], frame->buf[i]->size);
-            offset += frame->buf[i]->size;
-        }
-    }
-
+    MppFrame mppframe = avframe_to_mppframe(avctx, frame, codec->buffer_group, RGA_FORMAT_YCbCr_420_SP, 1);
     return mppframe;
 }

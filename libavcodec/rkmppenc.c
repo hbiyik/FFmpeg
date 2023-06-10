@@ -230,7 +230,7 @@ static int rkmpp_config(AVCodecContext *avctx, RKMPPCodec *codec, MppFrame mppfr
      switch (coding_type) {
          case MPP_VIDEO_CodingAVC : {
              mpp_enc_cfg_set_s32(cfg, "h264:profile", avctx->profile > 0 ? avctx->profile : FF_PROFILE_H264_HIGH);
-             mpp_enc_cfg_set_s32(cfg, "h264:level", avctx->level != FF_LEVEL_UNKNOWN ? avctx->level : 40);
+             mpp_enc_cfg_set_s32(cfg, "h264:level", avctx->level != FF_LEVEL_UNKNOWN ? avctx->level : 51);
              mpp_enc_cfg_set_s32(cfg, "h264:cabac_en", 1);
              mpp_enc_cfg_set_s32(cfg, "h264:cabac_idc", 0);
              mpp_enc_cfg_set_s32(cfg, "h264:trans8x8", 1);

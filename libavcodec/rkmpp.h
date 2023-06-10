@@ -19,6 +19,7 @@
 #endif
 
 #define RKMPP_FPS_FRAME_MACD 30
+#define RKMPP_STRIDE_ALIGN 16
 #define HDR_SIZE (1024)
 
 typedef struct {
