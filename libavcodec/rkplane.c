@@ -320,14 +320,13 @@ int mpp_nv16_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
 
     if(rga_convert_mpp_av(avctx, mppframe, frame, RGA_FORMAT_YCbCr_422_SP, RGA_FORMAT_YCbCr_420_SP)){
         // scale down uv plane by 2 and write it to uv plane of avbuffer
-        //FIXME for some reason this does not work, works for mpp_nv16_av_yuv420p though…..
         src += hstride * vstride;
         UVScale(src, hstride, frame->width, frame->height,
                 frame->data[1], hstride,
                 (frame->width + 1) >> 1, (frame->height + 1) >> 1, kFilterNone);
 
-        // just in case mpp and avframe calculates to different strides
         frame->linesize[0] = hstride;
+        frame->linesize[1] = hstride;
 
         // use existing y plane from mppbuffer
         frame->data[0] = mpp_buffer_get_ptr(buffer);
