@@ -9,6 +9,7 @@
 #include "decode.h"
 #include "encode.h"
 #include "libavutil/log.h"
+#include "libavutil/opt.h"
 #include "libavutil/buffer.h"
 #include "libavutil/pixfmt.h"
 
@@ -25,6 +26,11 @@
 typedef struct {
     AVClass *av_class;
     AVBufferRef *codec_ref;
+    int rc_mode;
+    int profile;
+    int level;
+    int coder;
+    int dct8x8;
 } RKMPPCodecContext;
 
 typedef struct {
@@ -67,9 +73,88 @@ uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency);
 int rkmpp_receive_frame(AVCodecContext *avctx, AVFrame *frame);
 int rkmpp_encode(AVCodecContext *avctx, AVPacket *packet, const AVFrame *frame, int *got_packet);
 
+enum {
+    RC_MODE_CQP,
+    RC_MODE_CBR,
+    RC_MODE_VBR,
+    RC_MODE_AVBR,
+};
+
+#define OFFSET(x) offsetof(RKMPPCodecContext, x)
+#define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
+
+#define ENCODEROPTS() \
+    { "rc_mode", "Set rate control mode", OFFSET(rc_mode), AV_OPT_TYPE_INT, \
+            { .i64 = MPP_ENC_RC_MODE_BUTT }, MPP_ENC_RC_MODE_VBR, MPP_ENC_RC_MODE_BUTT, VE, "rc_mode"}, \
+        {"VBR", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_VBR }, 0, 0, VE, "rc_mode" }, \
+        {"CBR", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_CBR }, 0, 0, VE, "rc_mode" }, \
+        {"CQP", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_FIXQP }, 0, 0, VE, "rc_mode" }, \
+        {"AVBR", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_AVBR }, 0, 0, VE, "rc_mode" },
+
+static const AVOption options_h264_encoder[] = {
+    ENCODEROPTS()
+    { "profile", "Set profile restrictions (h264_rkmpp)", OFFSET(profile), AV_OPT_TYPE_INT,
+            { .i64=-1 }, -1, FF_PROFILE_H264_HIGH, VE, "profile"},
+        { "baseline",   NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_H264_BASELINE},  INT_MIN, INT_MAX, VE, "profile" },
+        { "main",       NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_H264_MAIN},      INT_MIN, INT_MAX, VE, "profile" },
+        { "high",       NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_H264_HIGH},      INT_MIN, INT_MAX, VE, "profile" },
+    { "level", "Compression Level (h264_rkmpp)", OFFSET(level), AV_OPT_TYPE_INT,
+            { .i64 = 51 }, FF_LEVEL_UNKNOWN, 0xff, VE, "level"},
+        { "1",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 10 }, 0, 0, VE, "level"},
+        { "1.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 11 }, 0, 0, VE, "level"},
+        { "1.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 12 }, 0, 0, VE, "level"},
+        { "1.3",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 13 }, 0, 0, VE, "level"},
+        { "2",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 20 }, 0, 0, VE, "level"},
+        { "2.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 21 }, 0, 0, VE, "level"},
+        { "2.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 22 }, 0, 0, VE, "level"},
+        { "3",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 30 }, 0, 0, VE, "level"},
+        { "3.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 31 }, 0, 0, VE, "level"},
+        { "3.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 32 }, 0, 0, VE, "level"},
+        { "4",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 40 }, 0, 0, VE, "level"},
+        { "4.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 41 }, 0, 0, VE, "level"},
+        { "4.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 42 }, 0, 0, VE, "level"},
+        { "5",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 50 }, 0, 0, VE, "level"},
+        { "5.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 51 }, 0, 0, VE, "level"},
+        { "5.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 52 }, 0, 0, VE, "level"},
+        { "6",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 60 }, 0, 0, VE, "level"},
+        { "6.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 61 }, 0, 0, VE, "level"},
+        { "6.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 62 }, 0, 0, VE, "level"},
+    { "coder", "Entropy coder type (from 0 to 1) (default cabac)", OFFSET(coder), AV_OPT_TYPE_INT,
+            { .i64 = 1 }, 0, 1, VE, "coder"},
+        { "cavlc", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 0 }, INT_MIN, INT_MAX, VE, "coder" },
+        { "cabac", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 1 }, INT_MIN, INT_MAX, VE, "coder" },
+    { "8x8dct", "High profile 8x8 transform.",  OFFSET(dct8x8), AV_OPT_TYPE_BOOL, { .i64 = 1 }, 0, 1, VE},
+    { NULL }
+};
+
+static const AVOption options_hevc_encoder[] = {
+    ENCODEROPTS()
+    { NULL }
+};
+
+#define DECODEROPTIONS(NAME, TYPE) \
+static const AVOption options_##NAME##_##TYPE[] = { \
+            { NULL } \
+        };
+
+H26XOPTIONS(h264, encoder);
+H26XOPTIONS(hevc, encoder);
+
+DECODEROPTIONS(h263, decoder);
+DECODEROPTIONS(h264, decoder);
+DECODEROPTIONS(hevc, decoder);
+DECODEROPTIONS(av1, decoder);
+DECODEROPTIONS(vp8, decoder);
+DECODEROPTIONS(vp9, decoder);
+DECODEROPTIONS(mpeg1, decoder);
+DECODEROPTIONS(mpeg2, decoder);
+DECODEROPTIONS(mpeg4, decoder);
+
 #define RKMPP_CODEC(NAME, ID, BSFS, TYPE) \
         static const AVClass rkmpp_##NAME##_##TYPE##_class = { \
             .class_name = "rkmpp_" #NAME "_" #TYPE, \
+            .item_name  = av_default_item_name,\
+            .option     = options_##NAME##_##TYPE, \
             .version    = LIBAVUTIL_VERSION_INT, \
         }; \
         const FFCodec ff_##NAME##_rkmpp_##TYPE = { \

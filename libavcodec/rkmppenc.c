@@ -82,6 +82,8 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
     mpp_packet_deinit(&packet);
 
     codec->mpi->control(codec->ctx, MPP_SET_INPUT_TIMEOUT, &input_timeout);
+    avctx->profile = rk_context->profile;
+    avctx->level = rk_context->level;
     return 0;
 
 fail:
@@ -91,13 +93,15 @@ fail:
     return ret;
 }
 
-static int rkmpp_config(AVCodecContext *avctx, RKMPPCodec *codec, MppFrame mppframe){
+static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
+    RKMPPCodecContext *rk_context = avctx->priv_data;
+    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppEncCfg cfg = codec->enccfg;
     RK_U32 rc_mode, rc_qpinit, split_mode, split_arg, split_out, fps_in_num, fps_in_den, fps_out_num, fps_out_den;
     MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     MppEncHeaderMode header_mode;
     MppFrameFormat mpp_format = mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK;
-    int ret;
+    int ret, max_bps, min_bps;
 
     //prep config
     mpp_enc_cfg_set_s32(cfg, "prep:width", mpp_frame_get_width(mppframe));
@@ -127,18 +131,33 @@ static int rkmpp_config(AVCodecContext *avctx, RKMPPCodec *codec, MppFrame mppfr
     mpp_enc_cfg_set_s32(cfg, "rc:gop", FFMAX(avctx->gop_size, 1));
 
     // config rc: mode
-    rc_mode = MPP_ENC_RC_MODE_VBR;
-    if (avctx->flags & AV_CODEC_FLAG_QSCALE)
-        rc_mode = MPP_ENC_RC_MODE_FIXQP;
-    else if (avctx->bit_rate > 0 && avctx->rc_max_rate == avctx->bit_rate)
-        rc_mode = MPP_ENC_RC_MODE_CBR;
-    else if (avctx->bit_rate > 0)
-        rc_mode = MPP_ENC_RC_MODE_AVBR;
+    rc_mode = rk_context->rc_mode;
+    if(rc_mode == MPP_ENC_RC_MODE_BUTT){
+        rc_mode = MPP_ENC_RC_MODE_VBR;
+        if (avctx->flags & AV_CODEC_FLAG_QSCALE)
+            rc_mode = MPP_ENC_RC_MODE_FIXQP;
+        else if ((avctx->bit_rate > 0 && avctx->rc_max_rate == avctx->bit_rate))
+            rc_mode = MPP_ENC_RC_MODE_CBR;
+        else if (avctx->bit_rate > 0)
+            rc_mode = MPP_ENC_RC_MODE_AVBR;
+    }
+
+    switch(rc_mode){
+        case MPP_ENC_RC_MODE_VBR:
+            av_log(avctx, AV_LOG_INFO, "Rate Control mode is set to VBR\n"); break;
+        case MPP_ENC_RC_MODE_CBR:
+            av_log(avctx, AV_LOG_INFO, "Rate Control mode is set to CBR\n"); break;
+        case MPP_ENC_RC_MODE_FIXQP:
+            av_log(avctx, AV_LOG_INFO, "Rate Control mode is set to CQP\n"); break;
+        case MPP_ENC_RC_MODE_AVBR:
+            av_log(avctx, AV_LOG_INFO, "Rate Control mode is set to AVBR\n"); break;
+    }
 
     mpp_enc_cfg_set_u32(cfg, "rc:mode", rc_mode);
 
     // config rc: bps
     mpp_enc_cfg_set_u32(cfg, "rc:bps_target", avctx->bit_rate);
+
     switch (rc_mode) {
         case MPP_ENC_RC_MODE_FIXQP : {
             /* do not setup bitrate on FIXQP mode */
@@ -146,24 +165,32 @@ static int rkmpp_config(AVCodecContext *avctx, RKMPPCodec *codec, MppFrame mppfr
         }
         case MPP_ENC_RC_MODE_CBR : {
             /* CBR mode has narrow bound */
-            mpp_enc_cfg_set_s32(cfg, "rc:bps_max", avctx->bit_rate * 17 / 16);
-            mpp_enc_cfg_set_s32(cfg, "rc:bps_min", avctx->bit_rate * 15 / 16);
+            max_bps =  avctx->bit_rate * 17 / 16;
+            min_bps =  avctx->bit_rate * 15 / 16;
             break;
         }
         case MPP_ENC_RC_MODE_VBR :
         case MPP_ENC_RC_MODE_AVBR : {
             /* VBR mode has wide bound */
-            mpp_enc_cfg_set_s32(cfg, "rc:bps_max", avctx->bit_rate * 17 / 16);
-            mpp_enc_cfg_set_s32(cfg, "rc:bps_min", avctx->bit_rate * 1 / 16);
+            max_bps =  avctx->bit_rate * 17 / 16;
+            min_bps =  avctx->bit_rate * 1 / 16;
             break;
         }
         default : {
             /* default use CBR mode */
-            mpp_enc_cfg_set_s32(cfg, "rc:bps_max", avctx->bit_rate * 17 / 16);
-            mpp_enc_cfg_set_s32(cfg, "rc:bps_min", avctx->bit_rate * 15 / 16);
+            max_bps =  avctx->bit_rate * 17 / 16;
+            min_bps =  avctx->bit_rate * 15 / 16;
             break;
         }
     }
+
+    mpp_enc_cfg_set_s32(cfg, "rc:bps_max", max_bps);
+    mpp_enc_cfg_set_s32(cfg, "rc:bps_min", min_bps);
+
+    if(rc_mode == MPP_ENC_RC_MODE_FIXQP)
+        av_log(avctx, AV_LOG_INFO, "Bitrate Target/Min/Max is set to %d/%d/%d\n", avctx->bit_rate, avctx->bit_rate, avctx->bit_rate);
+    else
+        av_log(avctx, AV_LOG_INFO, "Bitrate Target/Min/Max is set to %d/%d/%d\n", avctx->bit_rate, min_bps, max_bps);
 
     // config rc: drop behaviour
     mpp_enc_cfg_set_u32(cfg, "rc:drop_mode", MPP_ENC_RC_DROP_FRM_DISABLED);
@@ -229,11 +256,25 @@ static int rkmpp_config(AVCodecContext *avctx, RKMPPCodec *codec, MppFrame mppfr
      mpp_enc_cfg_set_s32(cfg, "codec:type", coding_type);
      switch (coding_type) {
          case MPP_VIDEO_CodingAVC : {
-             mpp_enc_cfg_set_s32(cfg, "h264:profile", avctx->profile > 0 ? avctx->profile : FF_PROFILE_H264_HIGH);
-             mpp_enc_cfg_set_s32(cfg, "h264:level", avctx->level != FF_LEVEL_UNKNOWN ? avctx->level : 51);
-             mpp_enc_cfg_set_s32(cfg, "h264:cabac_en", 1);
+             mpp_enc_cfg_set_s32(cfg, "h264:profile", avctx->profile);
+             mpp_enc_cfg_set_s32(cfg, "h264:level", avctx->level);
+             mpp_enc_cfg_set_s32(cfg, "h264:cabac_en", rk_context->coder);
              mpp_enc_cfg_set_s32(cfg, "h264:cabac_idc", 0);
-             mpp_enc_cfg_set_s32(cfg, "h264:trans8x8", 1);
+             mpp_enc_cfg_set_s32(cfg, "h264:trans8x8", rk_context->dct8x8 && avctx->profile == FF_PROFILE_H264_HIGH ? 1 : 0);
+             switch(avctx->profile){
+                 case FF_PROFILE_H264_BASELINE: av_log(avctx, AV_LOG_INFO, "Profile is set to BASELINE\n"); break;
+                 case FF_PROFILE_H264_MAIN: av_log(avctx, AV_LOG_INFO, "Profile is set to MAIN\n"); break;
+                 case FF_PROFILE_H264_HIGH:
+                     av_log(avctx, AV_LOG_INFO, "Profile is set to HIGH\n");
+                     if(rk_context->dct8x8)
+                         av_log(avctx, AV_LOG_INFO, "8x8 Transform is enabled\n");
+                     break;
+             }
+             av_log(avctx, AV_LOG_INFO, "Level is set to %d\n", avctx->level);
+             if(rk_context->coder)
+                 av_log(avctx, AV_LOG_INFO, "Coder is set to CABAC\n");
+             else
+                 av_log(avctx, AV_LOG_INFO, "Coder is set to CAVLC\n");
              break;
          }
          case MPP_VIDEO_CodingHEVC :
@@ -309,7 +350,7 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
 
     // there coould be better ways to config the encoder, but lets do it this way atm.
     // FIXME: this is ugly
-    if(!codec->hasconfig && !rkmpp_config(avctx, codec, mppframe))
+    if(!codec->hasconfig && !rkmpp_config(avctx, mppframe))
         codec->hasconfig = 1;
 
     // put the frame in encoder
@@ -405,4 +446,3 @@ int rkmpp_encode(AVCodecContext *avctx, AVPacket *packet, const AVFrame *frame, 
 
 RKMPP_ENC(h264, AV_CODEC_ID_H264, "h264_mp4toannexb")
 RKMPP_ENC(hevc, AV_CODEC_ID_HEVC, "hevc_mp4toannexb")
-RKMPP_ENC(vp8, AV_CODEC_ID_VP8, NULL)
