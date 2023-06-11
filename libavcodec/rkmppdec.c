@@ -62,21 +62,6 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
     return 0;
 }
 
-static int rkmpp_set_nv12_buf(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame)
-{
-    MppBuffer buffer = mpp_frame_get_buffer(mppframe);
-    int hstride = mpp_frame_get_hor_stride(mppframe);
-    int vstride = mpp_frame_get_ver_stride(mppframe);
-
-    frame->data[0] = mpp_buffer_get_ptr(buffer); // y
-    frame->data[1] = frame->data[0] + hstride * vstride; // u + v
-    frame->extended_data = frame->data;
-
-    frame->linesize[0] = hstride;
-    frame->linesize[1] = hstride;
-
-    return 0;
-}
 
 static int rkmpp_set_drm_buf(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame)
 {
@@ -207,7 +192,7 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
                     av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV15->NV12 conversion.\n");
                     break;
                 case MPP_FMT_YUV420SP:
-                    codec->buffer_callback = rkmpp_set_nv12_buf;
+                    codec->buffer_callback = mpp_nv12_av_nv12;
                     av_log(avctx, AV_LOG_INFO, "Decoder is set to use MppBuffer with NV12.\n");
                     break;
                 case MPP_FMT_YUV422SP:

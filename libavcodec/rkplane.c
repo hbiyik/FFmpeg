@@ -298,6 +298,22 @@ int mpp_nv16_av_yuv420p(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame
 }
 
 //for decoder
+int mpp_nv12_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame)
+{
+    MppBuffer buffer = mpp_frame_get_buffer(mppframe);
+    int hstride = mpp_frame_get_hor_stride(mppframe);
+    int vstride = mpp_frame_get_ver_stride(mppframe);
+
+    frame->data[0] = mpp_buffer_get_ptr(buffer); // y
+    frame->data[1] = frame->data[0] + hstride * vstride; // u + v
+    frame->extended_data = frame->data;
+
+    frame->linesize[0] = hstride;
+    frame->linesize[1] = hstride;
+
+    return 0;
+}
+//for decoder
 int mpp_nv15_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
     // if there is no avbuffer for frame, claim it
     if(!frame->buf[0])
