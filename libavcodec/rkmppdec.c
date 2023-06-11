@@ -247,7 +247,8 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     }
 
     // set data3 to point mppframe always, this is later to be used in encoder
-    frame->data[3] = mppframe;
+    if(!frame->data[3])
+        frame->data[3] = mppframe;
     // set the buf0 if not already allocated by ffmpeg avbuffers else use buf[3]
     framebuf = set_mppframe_to_avbuff(mppframe);
     if (!framebuf) {

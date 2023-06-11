@@ -85,40 +85,56 @@ static int rga_scale(uint64_t rga_fd,
     return ioctl(rga_fd, RGA_BLIT_SYNC, &req);
 }
 
-static MppFrame avframe_to_mppframe(AVCodecContext *avctx, AVFrame *frame, MppBufferGroup buffer_group, int rga_format, int copy){
+static MppFrame create_mpp_frame(int width, int height, int rga_format, MppBufferGroup buffer_group){
     MppFrame mppframe = NULL;
     MppBuffer mppbuffer = NULL;
     int ysize, size, ret, hstride, vstride;
 
     ret = mpp_frame_init(&mppframe);
+
     if (ret) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to init mpp frame %d\n", ret);
         goto clean;
      }
 
-     mpp_frame_set_width(mppframe, frame->width);
-     mpp_frame_set_height(mppframe, frame->height);
+    mpp_frame_set_width(mppframe, width);
+    mpp_frame_set_height(mppframe, height);
 
-     hstride = FFALIGN(frame->width, RKMPP_STRIDE_ALIGN);
-     if(rga_format == RGA_FORMAT_YCbCr_420_SP || RGA_FORMAT_YCbCr_420_P){
-         vstride = FFALIGN(frame->height, RKMPP_STRIDE_ALIGN);
-         ysize = hstride * vstride;
-         size = ysize * 3 / 2;
-     }
+    hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
+    if(rga_format == RGA_FORMAT_YCbCr_420_SP || RGA_FORMAT_YCbCr_420_P){
+        vstride = FFALIGN(height, RKMPP_STRIDE_ALIGN);
+        ysize = hstride * vstride;
+        size = ysize * 3 / 2;
+    }
 
      mpp_frame_set_hor_stride(mppframe, hstride);
      mpp_frame_set_ver_stride(mppframe, vstride);
 
      ret = mpp_buffer_get(buffer_group, &mppbuffer, size);
      if (ret) {
-         av_log(avctx, AV_LOG_ERROR, "failed to get buffer for input frame ret %d\n", ret);
          goto clean;
      }
 
      mpp_frame_set_buffer(mppframe, mppbuffer);
      mpp_frame_set_buf_size(mppframe, size);
      mpp_buffer_put(mppbuffer);
-     if(copy){
+
+     return mppframe;
+
+clean:
+     if(mppbuffer)
+         mpp_buffer_put(mppbuffer);
+     if(mppframe)
+         mpp_frame_deinit(&mppframe);
+     return mppframe;
+}
+
+static MppFrame avframe_to_mppframe(AVFrame *frame, MppBufferGroup buffer_group, int rga_format){
+    MppFrame mppframe = create_mpp_frame(frame->width, frame->height, rga_format, buffer_group);
+    int ysize;
+
+     if(mppframe){
+         MppBuffer mppbuffer = mpp_frame_get_buffer(mppframe);
+         ysize = mpp_buffer_get_size(mppbuffer) * 2 / 3;
          if (rga_format == RGA_FORMAT_YCbCr_420_SP){
              mpp_buffer_write(mppbuffer, 0, frame->data[0], frame->buf[0]->size);
              mpp_buffer_write(mppbuffer, ysize, frame->data[1], frame->buf[1]->size);
@@ -130,13 +146,33 @@ static MppFrame avframe_to_mppframe(AVCodecContext *avctx, AVFrame *frame, MppBu
      }
 
      return mppframe;
+}
 
-clean:
-    if(mppbuffer)
-        mpp_buffer_put(mppbuffer);
-    if(mppframe)
-        mpp_frame_deinit(&mppframe);
-    return mppframe;
+static MppFrame rga_convert_mpp_mpp(AVCodecContext *avctx, MppFrame in_mppframe, int rga_informat, int rga_outformat){
+    RKMPPCodecContext *rk_context = avctx->priv_data;
+    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
+    int ysize, size, ret, hstride, vstride, height, width;
+
+    if (!codec->norga && codec->rga_fd >= 0){
+        MppFrame out_mppframe = create_mpp_frame(mpp_frame_get_width(in_mppframe), mpp_frame_get_height(in_mppframe), rga_outformat, codec->buffer_group);
+        if(!out_mppframe)
+            return NULL;
+        if(rga_scale(codec->rga_fd,
+            mpp_buffer_get_fd(mpp_frame_get_buffer(in_mppframe)), 0,
+            mpp_frame_get_width(in_mppframe), mpp_frame_get_height(in_mppframe),
+            mpp_frame_get_hor_stride(in_mppframe),  mpp_frame_get_ver_stride(in_mppframe),
+            mpp_buffer_get_fd(mpp_frame_get_buffer(out_mppframe)), 0,
+            mpp_frame_get_width(out_mppframe), mpp_frame_get_height(out_mppframe),
+            mpp_frame_get_hor_stride(out_mppframe),  mpp_frame_get_ver_stride(out_mppframe),
+            (uint32_t)rga_informat, (uint32_t)rga_outformat)){
+                av_log(avctx, AV_LOG_WARNING, "RGA failed falling back to soft conversion\n");
+                codec->norga = 1; // fallback to soft conversion
+                return NULL;
+        } else
+            return out_mppframe;
+    }
+
+    return NULL;
 }
 
 static int rga_convert_mpp_av(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame, int rga_informat, int rga_outformat){
@@ -168,7 +204,7 @@ static int rga_convert_av_mpp(AVCodecContext *avctx, AVFrame *frame, MppFrame mp
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
 
     if (!codec->norga && codec->rga_fd >= 0){
-        MppFrame in_mppframe = avframe_to_mppframe(avctx, frame, codec->buffer_group, rga_informat, 1);
+        MppFrame in_mppframe = avframe_to_mppframe(frame, codec->buffer_group, rga_informat);
         int ret;
 
         ret = rga_scale(codec->rga_fd,
@@ -194,6 +230,20 @@ clean:
     return 0;
 }
 
+
+static int mpp_nv12_av_yuv420p_soft(MppFrame mppframe, AVFrame *frame){
+    MppBuffer buffer = mpp_frame_get_buffer(mppframe);
+    int hstride = mpp_frame_get_hor_stride(mppframe);
+    int vstride = mpp_frame_get_ver_stride(mppframe);
+    frame->data[0] = mpp_buffer_get_ptr(buffer); // use existing y plane
+    frame->linesize[0] = hstride; // just in case mpp and avframe calculates to different strides
+    // convert only uv plane from semi-planar to planar
+    SplitUVPlane(mpp_buffer_get_ptr(buffer) + hstride * vstride, hstride,
+            frame->data[1], frame->linesize[1], frame->data[2], frame->linesize[2],
+            (frame->width + 1) >> 1, (frame->height + 1) >> 1);
+    return 0;
+}
+
 // for decoder
 int mpp_nv12_av_yuv420p(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
     // if there is no avbuffer for frame, claim it
@@ -202,16 +252,7 @@ int mpp_nv12_av_yuv420p(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame
 
     // try at least once with rga
     if(rga_convert_mpp_av(avctx, mppframe, frame, RGA_FORMAT_YCbCr_420_SP, RGA_FORMAT_YCbCr_420_P)){
-        MppBuffer buffer = mpp_frame_get_buffer(mppframe);
-        int hstride = mpp_frame_get_hor_stride(mppframe);
-        int vstride = mpp_frame_get_ver_stride(mppframe);
-        frame->data[0] = mpp_buffer_get_ptr(buffer); // use existing y plane
-        frame->linesize[0] = hstride; // just in case mpp and avframe calculates to different strides
-        // convert only uv plane from semi-planar to planar
-        SplitUVPlane(mpp_buffer_get_ptr(buffer) + hstride * vstride, hstride,
-                frame->data[1], frame->linesize[1], frame->data[2], frame->linesize[2],
-                (frame->width + 1) >> 1, (frame->height + 1) >> 1);
-        return 0;
+        return mpp_nv12_av_yuv420p_soft(mppframe, frame);
     } else
         return 0;
 
@@ -220,77 +261,64 @@ int mpp_nv12_av_yuv420p(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame
 
 //for decoder
 int mpp_nv15_av_yuv420p(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
-    RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    MppFrame nv12frame = NULL;
-    int ret;
-
-    if(!frame->buf[0])
-        ff_get_buffer(avctx, frame, 0);
-
-    nv12frame = avframe_to_mppframe(avctx, frame, codec->buffer_group, RGA_FORMAT_YCbCr_420_SP, 0);
     // rga1 which supports yuv420P output does not support nv15 input
     // therefore this first converts NV15->NV12 with rga2 than NV12 -> yuv420P with rga1
-    ret = rga_scale(codec->rga_fd,
-            mpp_buffer_get_fd(mpp_frame_get_buffer(mppframe)), 0,
-            mpp_frame_get_width(mppframe), mpp_frame_get_height(mppframe),
-            mpp_frame_get_hor_stride(mppframe),  mpp_frame_get_ver_stride(mppframe),
-            mpp_buffer_get_fd(mpp_frame_get_buffer(nv12frame)), 0,
-            mpp_frame_get_width(nv12frame), mpp_frame_get_height(nv12frame),
-            mpp_frame_get_hor_stride(nv12frame),  mpp_frame_get_ver_stride(nv12frame),
-            RGA_FORMAT_YCbCr_420_SP_10B, RGA_FORMAT_YCbCr_420_SP);
+    MppFrame nv12frame = rga_convert_mpp_mpp(avctx, mppframe, RGA_FORMAT_YCbCr_420_SP_10B, RGA_FORMAT_YCbCr_420_SP);
+    AVBufferRef *framebuf = NULL;
+    int ret;
 
-    if(ret){
-        av_log(avctx, AV_LOG_ERROR, "RGA failed to convert NV15 -> NV12. No Soft Conversion Possible\n");
-        goto clean;
-    }
+    if(nv12frame){
+        // if there is no avbuffer for frame, claim it
+        if(!frame->buf[0])
+            ff_get_buffer(avctx, frame, 0);
 
-    ret = mpp_nv12_av_yuv420p(avctx, nv12frame, frame);
-
-    // now another mppframe with nv12 is used for conversion, there is still possibility
-    // that soft conversion will depend on NV12 frame's y plane. Therefore we have keep
-    // it in mem until used.
-    if(!ret){
-        frame->buf[2] = set_mppframe_to_avbuff(nv12frame);
-        if(frame->buf[2])
+        ret = mpp_nv12_av_yuv420p_soft(nv12frame, frame);
+        if (ret)
             return ret;
-    }
-
-    ret = -1;
-clean:
-    mpp_frame_deinit(&nv12frame);
-    return ret;
+        framebuf = set_mppframe_to_avbuff(nv12frame);
+        if (!framebuf)
+            return AVERROR(ENOMEM);
+        frame->buf[1] = framebuf;
+        frame->data[3] = nv12frame;
+        return ret;
+    } else
+        av_log(avctx, AV_LOG_ERROR, "RGA failed to convert NV15 -> NV12. No Soft Conversion Possible\n");
+    return -1;
 }
 
-// for decoder
-int mpp_nv16_av_yuv420p(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
+static int mpp_nv16_av_yuv420p_soft(MppFrame mppframe, AVFrame *frame){
     MppBuffer buffer = mpp_frame_get_buffer(mppframe);
     int hstride = mpp_frame_get_hor_stride(mppframe);
     int vstride = mpp_frame_get_ver_stride(mppframe);
     char *src = mpp_buffer_get_ptr(buffer);
+    // scale down uv plane by 2 and write it to y plane of avbuffer temporarily
+    src += hstride * vstride;
+    UVScale(src, hstride, frame->width, frame->height,
+            frame->data[0], hstride,
+            (frame->width + 1) >> 1, (frame->height + 1) >> 1, kFilterNone);
+
+    // just in case mpp and avframe calculates to different strides
+    frame->linesize[0] = hstride;
+
+    // convert uv plane from semi-planar to planar
+    SplitUVPlane(frame->data[0], hstride,
+            frame->data[1], frame->linesize[1], frame->data[2], frame->linesize[2],
+            (frame->width + 1) >> 1, (frame->height + 1) >> 1);
+
+    // use existing y plane from mppbuffer
+    frame->data[0] = mpp_buffer_get_ptr(buffer);
+    return 0;
+}
+
+// for decoder
+int mpp_nv16_av_yuv420p(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
     // if there is no avbuffer for frame, claim it
     if(!frame->buf[0])
         ff_get_buffer(avctx, frame, 0);
 
     // try at least once with rga
     if(rga_convert_mpp_av(avctx, mppframe, frame, RGA_FORMAT_YCbCr_422_SP, RGA_FORMAT_YCbCr_420_P)){
-        // scale down uv plane by 2 and write it to y plane of avbuffer temporarily
-        src += hstride * vstride;
-        UVScale(src, hstride, frame->width, frame->height,
-                frame->data[0], hstride,
-                (frame->width + 1) >> 1, (frame->height + 1) >> 1, kFilterNone);
-
-        // just in case mpp and avframe calculates to different strides
-        frame->linesize[0] = hstride;
-
-        // convert uv plane from semi-planar to planar
-        SplitUVPlane(frame->data[0], hstride,
-                frame->data[1], frame->linesize[1], frame->data[2], frame->linesize[2],
-                (frame->width + 1) >> 1, (frame->height + 1) >> 1);
-
-        // use existing y plane from mppbuffer
-        frame->data[0] = mpp_buffer_get_ptr(buffer);
-        return 0;
+        return mpp_nv16_av_yuv420p_soft(mppframe, frame);
     } else
         return 0;
 
@@ -315,38 +343,51 @@ int mpp_nv12_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame)
 }
 //for decoder
 int mpp_nv15_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
-    // if there is no avbuffer for frame, claim it
-    if(!frame->buf[0])
-        ff_get_buffer(avctx, frame, 0);
+    MppFrame nv12frame = rga_convert_mpp_mpp(avctx, mppframe, RGA_FORMAT_YCbCr_420_SP_10B, RGA_FORMAT_YCbCr_420_SP);
+    AVBufferRef *framebuf = NULL;
+    int ret, swap;
 
-    if(rga_convert_mpp_av(avctx, mppframe, frame, RGA_FORMAT_YCbCr_420_SP_10B, RGA_FORMAT_YCbCr_420_SP))
+    if(nv12frame){
+        ret = mpp_nv12_av_nv12(avctx, nv12frame, frame);
+        framebuf = set_mppframe_to_avbuff(nv12frame);
+        if (!framebuf)
+            return AVERROR(ENOMEM);
+        frame->buf[0] = framebuf;
+        frame->data[3] = nv12frame;
+        return ret;
+    } else
         av_log(avctx, AV_LOG_ERROR, "RGA failed to convert NV15 -> NV12. No Soft Conversion Possible\n");
+    return -1;
+}
+
+static int mpp_nv16_av_nv12_soft(MppFrame mppframe, AVFrame *frame){
+    MppBuffer buffer = mpp_frame_get_buffer(mppframe);
+    int hstride = mpp_frame_get_hor_stride(mppframe);
+    int vstride = mpp_frame_get_ver_stride(mppframe);
+    char *src = mpp_buffer_get_ptr(buffer);
+    // scale down uv plane by 2 and write it to uv plane of avbuffer
+    src += hstride * vstride;
+    UVScale(src, hstride, frame->width, frame->height,
+            frame->data[1], hstride,
+            (frame->width + 1) >> 1, (frame->height + 1) >> 1, kFilterNone);
+
+    frame->linesize[0] = hstride;
+    frame->linesize[1] = hstride;
+
+    // use existing y plane from mppbuffer
+    frame->data[0] = mpp_buffer_get_ptr(buffer);
     return 0;
 }
 
 //for decoder
 int mpp_nv16_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
-    MppBuffer buffer = mpp_frame_get_buffer(mppframe);
-    int hstride = mpp_frame_get_hor_stride(mppframe);
-    int vstride = mpp_frame_get_ver_stride(mppframe);
-    char *src = mpp_buffer_get_ptr(buffer);
+
     // if there is no avbuffer for frame, claim it
     if(!frame->buf[0])
         ff_get_buffer(avctx, frame, 0);
 
     if(rga_convert_mpp_av(avctx, mppframe, frame, RGA_FORMAT_YCbCr_422_SP, RGA_FORMAT_YCbCr_420_SP)){
-        // scale down uv plane by 2 and write it to uv plane of avbuffer
-        src += hstride * vstride;
-        UVScale(src, hstride, frame->width, frame->height,
-                frame->data[1], hstride,
-                (frame->width + 1) >> 1, (frame->height + 1) >> 1, kFilterNone);
-
-        frame->linesize[0] = hstride;
-        frame->linesize[1] = hstride;
-
-        // use existing y plane from mppbuffer
-        frame->data[0] = mpp_buffer_get_ptr(buffer);
-        return 0;
+        return mpp_nv16_av_nv12_soft(mppframe, frame);
     } else
         return 0;
 
@@ -357,8 +398,8 @@ int mpp_nv16_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
 MppFrame av_yuv420p_mpp_nv12(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    MppFrame out_mppframe = avframe_to_mppframe(avctx, frame, codec->buffer_group, RGA_FORMAT_YCbCr_420_SP, 0);
-    if(rga_convert_av_mpp(avctx, frame, out_mppframe, RGA_FORMAT_YCbCr_420_P, RGA_FORMAT_YCbCr_420_SP)){
+    MppFrame out_mppframe = create_mpp_frame(frame->width, frame->height, RGA_FORMAT_YCbCr_420_SP, codec->buffer_group);
+    if(out_mppframe && rga_convert_av_mpp(avctx, frame, out_mppframe, RGA_FORMAT_YCbCr_420_P, RGA_FORMAT_YCbCr_420_SP)){
             MppBuffer out_buffer = mpp_frame_get_buffer(out_mppframe);
             int planesize = mpp_frame_get_hor_stride(out_mppframe) * mpp_frame_get_ver_stride(out_mppframe);
             char *dst = (char *) mpp_buffer_get_ptr(out_buffer) + planesize;
@@ -376,6 +417,5 @@ MppFrame av_yuv420p_mpp_nv12(AVCodecContext *avctx, AVFrame *frame){
 MppFrame av_nv12_mpp_nv12(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    MppFrame mppframe = avframe_to_mppframe(avctx, frame, codec->buffer_group, RGA_FORMAT_YCbCr_420_SP, 1);
-    return mppframe;
+    return avframe_to_mppframe(frame, codec->buffer_group, RGA_FORMAT_YCbCr_420_SP);
 }
