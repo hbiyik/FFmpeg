@@ -2,8 +2,6 @@
 #ifndef _RGA_DRIVER_H_
 #define _RGA_DRIVER_H_
 
-#include <stdint.h>
-
 /* Use 'r' as magic number */
 #define RGA_IOC_MAGIC		'r'
 #define RGA_IOW(nr, type)	_IOW(RGA_IOC_MAGIC, nr, type)

@@ -1,6 +1,7 @@
 #include <drm_fourcc.h>
 #include <rockchip/rk_mpi.h>
 #include <unistd.h>
+#include <stdint.h>
 
 #include "internal.h"
 #include "codec_internal.h"
@@ -8,12 +9,13 @@
 #include "hwconfig.h"
 #include "decode.h"
 #include "encode.h"
+#include "rkrga.h"
 #include "libavutil/log.h"
 #include "libavutil/opt.h"
 #include "libavutil/buffer.h"
 #include "libavutil/pixfmt.h"
 #include "libavutil/pixdesc.h"
-
+#include "libavutil/hwcontext_drm.h"
 
 // HACK: Older BSP kernel use NA12 for NV15.
 #ifndef DRM_FORMAT_NV15 // fourcc_code('N', 'V', '1', '5')
@@ -23,6 +25,12 @@
 #define RKMPP_FPS_FRAME_MACD 30
 #define RKMPP_STRIDE_ALIGN 16
 #define HDR_SIZE (1024)
+
+#define DRMFORMATNAME(buf, format) \
+    buf[0] = format & 0xff; \
+    buf[1] = (format >> 8) & 0xff; \
+    buf[2] = (format >> 16) & 0xff; \
+    buf[3] = (format >> 24) & 0x7f; \
 
 typedef struct {
     AVClass *av_class;
@@ -48,38 +56,36 @@ typedef struct {
     AVBufferRef *hwdevice_ref;
 
     char print_fps;
-
     uint64_t last_frame_time;
     uint64_t frames;
     uint64_t latencies[RKMPP_FPS_FRAME_MACD];
 
-    uint32_t drm_format;
     int rga_fd;
     int8_t norga;
-    int (*buffer_callback)(struct AVCodecContext *avctx, MppFrame mppframe, struct AVFrame *frame);
     int (*init_callback)(struct AVCodecContext *avctx);
-
 } RKMPPCodec;
 
+typedef struct {
+    enum AVPixelFormat av;
+    MppFrameFormat mpp;
+    uint32_t drm;
+    enum rga_surf_format rga;
+} rkformat;
+
 MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx);
+int rkmpp_get_drm_format(rkformat *format, uint32_t informat);
+int rkmpp_get_mpp_format(rkformat *format, MppFrameFormat informat);
+int rkmpp_get_rga_format(rkformat *format, enum rga_surf_format informat);
+int rkmpp_get_av_format(rkformat *format, enum AVPixelFormat informat);
 int rkmpp_init_encoder(AVCodecContext *avctx);
+int rkmpp_encode(AVCodecContext *avctx, AVPacket *packet, const AVFrame *frame, int *got_packet);
 int rkmpp_init_decoder(AVCodecContext *avctx);
-AVBufferRef *set_mppframe_to_avbuff(MppFrame mppframe);
+int rkmpp_receive_frame(AVCodecContext *avctx, AVFrame *frame);
+int rkmpp_init_codec(AVCodecContext *avctx);
 int rkmpp_close_codec(AVCodecContext *avctx);
 void rkmpp_release_codec(void *opaque, uint8_t *data);
-int rkmpp_init_codec(AVCodecContext *avctx);
 void rkmpp_flush(AVCodecContext *avctx);
 uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency);
-
-int rkmpp_receive_frame(AVCodecContext *avctx, AVFrame *frame);
-int rkmpp_encode(AVCodecContext *avctx, AVPacket *packet, const AVFrame *frame, int *got_packet);
-
-enum {
-    RC_MODE_CQP,
-    RC_MODE_CBR,
-    RC_MODE_VBR,
-    RC_MODE_AVBR,
-};
 
 #define OFFSET(x) offsetof(RKMPPCodecContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
@@ -138,9 +144,6 @@ static const AVOption options_##NAME##_##TYPE[] = { \
             { NULL } \
         };
 
-H26XOPTIONS(h264, encoder);
-H26XOPTIONS(hevc, encoder);
-
 DECODEROPTIONS(h263, decoder);
 DECODEROPTIONS(h264, decoder);
 DECODEROPTIONS(hevc, decoder);
@@ -189,8 +192,17 @@ DECODEROPTIONS(mpeg4, decoder);
 #define RKMPP_ENC(NAME, ID, BSFS) \
         RKMPP_CODEC(NAME, ID, BSFS, encoder) \
         FF_CODEC_ENCODE_CB(rkmpp_encode), \
-        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_BGR0, \
+        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_BGR565,\
+                                                         AV_PIX_FMT_YUYV422, \
+                                                         AV_PIX_FMT_UYVY422, \
+                                                         AV_PIX_FMT_NV16, \
+                                                         AV_PIX_FMT_YUV422P, \
+                                                         AV_PIX_FMT_BGR24,\
+                                                         AV_PIX_FMT_BGRA, \
+                                                         AV_PIX_FMT_BGR0, \
                                                          AV_PIX_FMT_NV12, \
+                                                         AV_PIX_FMT_YUV420P, \
+                                                         AV_PIX_FMT_DRM_PRIME, \
                                                          AV_PIX_FMT_NONE}, \
         .hw_configs     = (const AVCodecHWConfigInternal *const []) { HW_CONFIG_INTERNAL(NV12), \
                                                                       NULL}, \

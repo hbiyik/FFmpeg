@@ -20,7 +20,6 @@
  */
 #include "rkmpp.h"
 #include "rkplane.h"
-#include "libavutil/hwcontext_drm.h"
 
 
 int rkmpp_init_decoder(AVCodecContext *avctx){
@@ -62,63 +61,14 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
     return 0;
 }
 
-
-static int rkmpp_set_drm_buf(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame)
-{
-    RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    AVDRMFrameDescriptor *desc = NULL;
-    AVDRMLayerDescriptor *layer = NULL;
-    MppBuffer buffer = mpp_frame_get_buffer(mppframe);
-    int ret;
-
-    desc = av_mallocz(sizeof(AVDRMFrameDescriptor));
-    if (!desc) {
-        ret = AVERROR(ENOMEM);
-        goto fail;
-    }
-
-    desc->nb_objects = 1;
-    desc->objects[0].fd = mpp_buffer_get_fd(buffer);
-    desc->objects[0].size = mpp_buffer_get_size(buffer);
-
-    desc->nb_layers = 1;
-    layer = &desc->layers[0];
-    layer->format = codec->drm_format;
-    layer->nb_planes = 2;
-
-    layer->planes[0].object_index = 0;
-    layer->planes[0].offset = 0;
-    layer->planes[0].pitch = mpp_frame_get_hor_stride(mppframe);
-
-    layer->planes[1].object_index = 0;
-    layer->planes[1].offset = layer->planes[0].pitch * mpp_frame_get_ver_stride(mppframe);
-    layer->planes[1].pitch = layer->planes[0].pitch;
-
-    frame->data[0]  = (uint8_t *)desc;
-
-    frame->hw_frames_ctx = av_buffer_ref(codec->hwframes_ref);
-    if (!frame->hw_frames_ctx) {
-        ret = AVERROR(ENOMEM);
-        goto fail;
-    }
-
-    return 0;
-
-fail:
-    if (desc)
-        av_free(desc);
-
-    return ret;
-}
-
 static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
 {
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
+    MppFrameFormat mpp_format;
     MppFrame mppframe = NULL;
     MppBuffer buffer = NULL;
-    AVBufferRef *framebuf = NULL;
+    rkformat format;
     int ret, mode, latency;
 
     codec->mpi->control(codec->ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&timeout);
@@ -152,72 +102,29 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
         goto clean;
     }
 
+     mpp_format = mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK;
+
     if (mpp_frame_get_info_change(mppframe)) {
-        MppFrameFormat mpp_format = mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK;
         av_log(avctx, AV_LOG_INFO, "Decoder noticed an info change\n");
 
         if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+            char drmname[4];
             AVHWFramesContext *hwframes;
-            uint32_t sw_format;
+            rkmpp_get_mpp_format(&format, mpp_format);
+            DRMFORMATNAME(drmname, format.drm)
 
-            codec->buffer_callback = rkmpp_set_drm_buf;
-            switch(mpp_format){
-                case MPP_FMT_YUV420SP_10BIT:
-                    codec->drm_format = DRM_FORMAT_NV15;
-                    sw_format = AV_PIX_FMT_NONE;
-                    av_log(avctx, AV_LOG_INFO, "Decoder is set to use DRMPrime with NV15.\n");
-                    break;
-                case MPP_FMT_YUV420SP:
-                    codec->drm_format = DRM_FORMAT_NV12;
-                    sw_format = AV_PIX_FMT_NV12;
-                    av_log(avctx, AV_LOG_INFO, "Decoder is set to use DRMPrime with NV12.\n");
-                    break;
-                case MPP_FMT_YUV422SP:
-                    codec->drm_format = DRM_FORMAT_NV16;
-                    sw_format = AV_PIX_FMT_NV16;
-                    av_log(avctx, AV_LOG_INFO, "Decoder is set to use DRMPrime with NV16.\n");
-                    break;
-            }
             hwframes = (AVHWFramesContext*)codec->hwframes_ref->data;
             hwframes->format    = AV_PIX_FMT_DRM_PRIME;
-            hwframes->sw_format = sw_format;
+            hwframes->sw_format = format.av;
             hwframes->width     = avctx->width;
             hwframes->height    = avctx->height;
             ret = av_hwframe_ctx_init(codec->hwframes_ref);
-            av_log(avctx, AV_LOG_INFO, "Software Picture format is %s.\n", av_get_pix_fmt_name(sw_format));
-
-        } else if(avctx->pix_fmt == AV_PIX_FMT_NV12){
-            switch(mpp_format){
-                case MPP_FMT_YUV420SP_10BIT:
-                    codec->buffer_callback = mpp_nv15_av_nv12;
-                    av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV15->NV12 conversion.\n");
-                    break;
-                case MPP_FMT_YUV420SP:
-                    codec->buffer_callback = mpp_nv12_av_nv12;
-                    av_log(avctx, AV_LOG_INFO, "Decoder is set to use MppBuffer with NV12.\n");
-                    break;
-                case MPP_FMT_YUV422SP:
-                    codec->buffer_callback = mpp_nv16_av_nv12;
-                    av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV16->NV12 conversion.\n");
-                    break;
-            }
-        } else if (avctx->pix_fmt == AV_PIX_FMT_YUV420P){
-            switch(mpp_format){
-                case MPP_FMT_YUV420SP_10BIT:
-                    codec->buffer_callback = mpp_nv15_av_yuv420p;
-                    av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV15->YUV420P conversion.\n");
-                    break;
-                case MPP_FMT_YUV420SP:
-                    codec->buffer_callback = mpp_nv12_av_yuv420p;
-                    av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV12->YUV420P conversion.\n");
-                    break;
-                case MPP_FMT_YUV422SP:
-                    codec->buffer_callback = mpp_nv16_av_yuv420p;
-                    av_log(avctx, AV_LOG_INFO, "Decoder is set to use AVBuffer with NV16->YUV420P conversion.\n");
-                    break;
-            }
+            // FIXME: handle error
+            av_log(avctx, AV_LOG_INFO, "Decoder is set to DRM Prime with format %s.\n", drmname);
         }
         codec->mpi->control(codec->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
+        if(mpp_format == MPP_FMT_YUV420SP_10BIT)
+            av_log(avctx, AV_LOG_WARNING, "10bit NV15 plane will be downgraded to 8bit %s.\n", av_get_pix_fmt_name(avctx->pix_fmt));
         goto clean;
     }
 
@@ -234,32 +141,23 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
 
     latency = rkmpp_update_latency(avctx, -1);
 
-    if(!codec->buffer_callback){
-        ret = AVERROR_UNKNOWN;
-        av_log(avctx, AV_LOG_ERROR, "Decoder can't set output for AVFormat:%d.\n", avctx->pix_fmt);
-        goto clean;
+    if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+        ret = import_mpp_to_drm(avctx, mppframe, frame);
+    } else if (mpp_format == MPP_FMT_YUV420SP_10BIT && avctx->pix_fmt == AV_PIX_FMT_NV12){
+        ret = mpp_nv15_av_nv12(avctx, mppframe, frame);
+    } else if (mpp_format == MPP_FMT_YUV420SP_10BIT && avctx->pix_fmt == AV_PIX_FMT_YUV420P){
+        ret = mpp_nv15_av_yuv420p(avctx, mppframe, frame);
+    } else if (mpp_format == MPP_FMT_YUV420SP && avctx->pix_fmt == AV_PIX_FMT_NV12){
+        ret = mpp_nv12_av_nv12(avctx, mppframe, frame);
+    } else {
+        rkmpp_get_mpp_format(&format, mpp_format);
+        ret = convert_mpp_to_av(avctx, mppframe, frame, format.av, avctx->pix_fmt);
     }
 
-    ret = codec->buffer_callback(avctx, mppframe, frame);
-
-    if(ret){
+    if(ret < 0){
         av_log(avctx, AV_LOG_ERROR, "Failed set frame buffer (code = %d)\n", ret);
-        goto clean;
+        return ret;
     }
-
-    // set data3 to point mppframe always, this is later to be used in encoder
-    if(!frame->data[3])
-        frame->data[3] = mppframe;
-    // set the buf0 if not already allocated by ffmpeg avbuffers else use buf[3]
-    framebuf = set_mppframe_to_avbuff(mppframe);
-    if (!framebuf) {
-        ret = AVERROR(ENOMEM);
-        goto clean;
-    }
-    if(frame->buf[0])
-        frame->buf[3] = framebuf;
-    else
-        frame->buf[0] = framebuf;
 
     latency = rkmpp_update_latency(avctx, latency);
 

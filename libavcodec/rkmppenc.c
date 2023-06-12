@@ -188,9 +188,9 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     mpp_enc_cfg_set_s32(cfg, "rc:bps_min", min_bps);
 
     if(rc_mode == MPP_ENC_RC_MODE_FIXQP)
-        av_log(avctx, AV_LOG_INFO, "Bitrate Target/Min/Max is set to %d/%d/%d\n", avctx->bit_rate, avctx->bit_rate, avctx->bit_rate);
+        av_log(avctx, AV_LOG_INFO, "Bitrate Target/Min/Max is set to %ld/%ld/%ld\n", avctx->bit_rate, avctx->bit_rate, avctx->bit_rate);
     else
-        av_log(avctx, AV_LOG_INFO, "Bitrate Target/Min/Max is set to %d/%d/%d\n", avctx->bit_rate, min_bps, max_bps);
+        av_log(avctx, AV_LOG_INFO, "Bitrate Target/Min/Max is set to %ld/%d/%d\n", avctx->bit_rate, min_bps, max_bps);
 
     // config rc: drop behaviour
     mpp_enc_cfg_set_u32(cfg, "rc:drop_mode", MPP_ENC_RC_DROP_FRM_DISABLED);
@@ -320,30 +320,22 @@ static void rkmpp_release_packet_buf(void *opaque, uint8_t *data){
     mpp_packet_deinit(&mpppacket);
 }
 
-static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
+static int rkmpp_send_frame(AVCodecContext *avctx, const AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame mppframe = NULL;
-    int ret=0, clean=1;
+    int ret=0;
 
     // EOS frame, avframe=NULL
     if (!frame) {
         av_log(avctx, AV_LOG_DEBUG, "End of stream.\n");
         mpp_frame_init(&mppframe);
         mpp_frame_set_eos(mppframe, 1);
-        clean = 0;
     } else {
-        //MPPFrame from rkmppdec.c
-        if (mpp_frame_get_buffer(frame->data[3])){
-            mppframe = (MppFrame)frame->data[3];
-        // any other ffmpeg buffer
-        } else if (avctx->pix_fmt == AV_PIX_FMT_NV12)
-            mppframe = av_nv12_mpp_nv12(avctx, frame);
-        else if (avctx->pix_fmt == AV_PIX_FMT_BGR0)
-            mppframe = av_bgrx8888_mpp_bgr888(avctx, frame);
-
-        if (frame->pict_type == AV_PICTURE_TYPE_I) {
-            av_log(avctx, AV_LOG_ERROR, "TYPE_I for testing.\n");
+        if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+            mppframe = import_drm_to_mpp(avctx, frame);
+        } else {
+            mppframe = copy_av_to_mpp(frame, avctx->pix_fmt, codec->buffer_group);
         }
         mpp_frame_set_pts(mppframe, frame->pts);
         mpp_frame_set_dts(mppframe, frame->pkt_dts);
@@ -363,8 +355,7 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
     } else
         av_log(avctx, AV_LOG_DEBUG, "Wrote %ld bytes to encoder\n", mpp_frame_get_buf_size(mppframe));
 
-    if (clean)
-        mpp_frame_deinit(&mppframe);
+    mpp_frame_deinit(&mppframe);
     return ret;
 }
 
