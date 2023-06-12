@@ -184,6 +184,7 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
             hwframes->width     = avctx->width;
             hwframes->height    = avctx->height;
             ret = av_hwframe_ctx_init(codec->hwframes_ref);
+            av_log(avctx, AV_LOG_INFO, "Software Picture format is %s.\n", av_get_pix_fmt_name(sw_format));
 
         } else if(avctx->pix_fmt == AV_PIX_FMT_NV12){
             switch(mpp_format){

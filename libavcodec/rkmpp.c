@@ -166,7 +166,8 @@ int rkmpp_init_codec(AVCodecContext *avctx)
         goto fail;
     }
 
-    avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
+    if (avctx->pix_fmt == AV_PIX_FMT_NONE)
+        avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
 
     // override the the pixfmt according env variable
     env = getenv("FFMPEG_RKMPP_PIXFMT");
@@ -178,6 +179,8 @@ int rkmpp_init_codec(AVCodecContext *avctx)
         else if(!strcmp(env, "DRMPRIME"))
             avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
     }
+
+    av_log(avctx, AV_LOG_INFO, "Picture format is %s.\n", av_get_pix_fmt_name(avctx->pix_fmt));
 
     env = getenv("FFMPEG_RKMPP_NORGA");
     if(env != NULL){

@@ -12,6 +12,7 @@
 #include "libavutil/opt.h"
 #include "libavutil/buffer.h"
 #include "libavutil/pixfmt.h"
+#include "libavutil/pixdesc.h"
 
 
 // HACK: Older BSP kernel use NA12 for NV15.
@@ -188,7 +189,8 @@ DECODEROPTIONS(mpeg4, decoder);
 #define RKMPP_ENC(NAME, ID, BSFS) \
         RKMPP_CODEC(NAME, ID, BSFS, encoder) \
         FF_CODEC_ENCODE_CB(rkmpp_encode), \
-        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_NV12, \
+        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_BGR0, \
+                                                         AV_PIX_FMT_NV12, \
                                                          AV_PIX_FMT_NONE}, \
         .hw_configs     = (const AVCodecHWConfigInternal *const []) { HW_CONFIG_INTERNAL(NV12), \
                                                                       NULL}, \

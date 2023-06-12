@@ -324,22 +324,23 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame mppframe = NULL;
-    int ret=0, clean=0;
+    int ret=0, clean=1;
 
     // EOS frame, avframe=NULL
     if (!frame) {
         av_log(avctx, AV_LOG_DEBUG, "End of stream.\n");
         mpp_frame_init(&mppframe);
         mpp_frame_set_eos(mppframe, 1);
+        clean = 0;
     } else {
         //MPPFrame from rkmppdec.c
         if (mpp_frame_get_buffer(frame->data[3])){
             mppframe = (MppFrame)frame->data[3];
         // any other ffmpeg buffer
-        } else {
+        } else if (avctx->pix_fmt == AV_PIX_FMT_NV12)
             mppframe = av_nv12_mpp_nv12(avctx, frame);
-            clean = 1;
-        }
+        else if (avctx->pix_fmt == AV_PIX_FMT_BGR0)
+            mppframe = av_bgrx8888_mpp_bgr888(avctx, frame);
 
         if (frame->pict_type == AV_PICTURE_TYPE_I) {
             av_log(avctx, AV_LOG_ERROR, "TYPE_I for testing.\n");

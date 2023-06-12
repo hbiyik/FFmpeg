@@ -9,3 +9,4 @@ int mpp_nv15_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame);
 int mpp_nv16_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame);
 MppFrame av_yuv420p_mpp_nv12(AVCodecContext *avctx, AVFrame *frame);
 MppFrame av_nv12_mpp_nv12(AVCodecContext *avctx, AVFrame *frame);
+MppFrame av_bgrx8888_mpp_bgr888(AVCodecContext *avctx, AVFrame *frame);
