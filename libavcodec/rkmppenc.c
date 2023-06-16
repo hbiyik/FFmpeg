@@ -324,7 +324,7 @@ static int rkmpp_send_frame(AVCodecContext *avctx, const AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame mppframe = NULL;
-    int ret=0;
+    int ret=0, keepframe=0;
 
     // EOS frame, avframe=NULL
     if (!frame) {
@@ -335,8 +335,13 @@ static int rkmpp_send_frame(AVCodecContext *avctx, const AVFrame *frame){
         if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
             mppframe = import_drm_to_mpp(avctx, frame);
         } else {
-            mppframe = copy_av_to_mpp(frame, avctx->pix_fmt, codec->buffer_group);
+            mppframe = get_mppframe_from_av(frame);
+            if(mppframe)
+                keepframe = 1;
+            else
+                mppframe = create_mpp_frame(frame->width, frame->height, avctx->pix_fmt, codec->buffer_group, NULL, frame);
         }
+        //FIXME: handle exception if mppframe is still NULL
         mpp_frame_set_pts(mppframe, frame->pts);
         mpp_frame_set_dts(mppframe, frame->pkt_dts);
     }
@@ -355,7 +360,8 @@ static int rkmpp_send_frame(AVCodecContext *avctx, const AVFrame *frame){
     } else
         av_log(avctx, AV_LOG_DEBUG, "Wrote %ld bytes to encoder\n", mpp_frame_get_buf_size(mppframe));
 
-    mpp_frame_deinit(&mppframe);
+    if(!keepframe)
+        mpp_frame_deinit(&mppframe);
     return ret;
 }
 

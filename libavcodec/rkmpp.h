@@ -10,6 +10,7 @@
 #include "decode.h"
 #include "encode.h"
 #include "rkrga.h"
+#include "libavutil/macros.h"
 #include "libavutil/log.h"
 #include "libavutil/opt.h"
 #include "libavutil/buffer.h"
@@ -24,6 +25,7 @@
 
 #define RKMPP_FPS_FRAME_MACD 30
 #define RKMPP_STRIDE_ALIGN 16
+#define RKMPP_MPPFRAME_BUFINDEX 7
 #define HDR_SIZE (1024)
 
 #define DRMFORMATNAME(buf, format) \
@@ -192,8 +194,7 @@ DECODEROPTIONS(mpeg4, decoder);
 #define RKMPP_ENC(NAME, ID, BSFS) \
         RKMPP_CODEC(NAME, ID, BSFS, encoder) \
         FF_CODEC_ENCODE_CB(rkmpp_encode), \
-        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_BGR565,\
-                                                         AV_PIX_FMT_YUYV422, \
+        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUYV422, \
                                                          AV_PIX_FMT_UYVY422, \
                                                          AV_PIX_FMT_NV16, \
                                                          AV_PIX_FMT_YUV422P, \
