@@ -333,13 +333,15 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         break;
     }
 
+
     if(desc){
         MppBufferInfo info;
         AVDRMLayerDescriptor *layer = &desc->layers[0];
 
-        size = desc->objects[0].size;
-        hstride =layer->planes[0].pitch;
-        vstride = height;
+        size = FFMIN(desc->objects[0].size, size);
+        //size = desc->objects[0].size;
+        //hstride =layer->planes[0].pitch;
+        //vstride = height;
 
         memset(&info, 0, sizeof(info));
         info.type   = MPP_BUFFER_TYPE_DRM;
@@ -367,10 +369,20 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
 
      if(frame){
          //copy frame to mppframe
-         int offset = 0;
+         int offset = 0, planesize=0, bufsize=0;
          for(int i = 0; i < planes; i++){
-             mpp_buffer_write(mppbuffer, offset, frame->data[i], FFMIN(planesizes[i], frame->buf[i]->size));
-             offset += planesizes[i];
+             // calcualte the av buffer size.
+             if(frame->buf[i])
+                 bufsize += frame->buf[i]->size;
+             // for last plane, dont exceed the avbuffer size, or mpp buffer size
+             if (i + 1 == planes)
+                 planesize = FFMIN(bufsize - offset, planesizes[i]);
+             // for other planes use the calculated size
+             else
+                 planesize = planesizes[i];
+             mpp_buffer_write(mppbuffer, offset, frame->data[i], planesize);
+             // calculate the offset according to mppbuffer alignment not av.
+             offset += planesize;
          }
      }
 
