@@ -369,20 +369,10 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
 
      if(frame){
          //copy frame to mppframe
-         int offset = 0, planesize=0, bufsize=0;
+         int offset = 0;
          for(int i = 0; i < planes; i++){
-             // calcualte the av buffer size.
-             if(frame->buf[i])
-                 bufsize += frame->buf[i]->size;
-             // for last plane, dont exceed the avbuffer size, or mpp buffer size
-             if (i + 1 == planes)
-                 planesize = FFMIN(bufsize - offset, planesizes[i]);
-             // for other planes use the calculated size
-             else
-                 planesize = planesizes[i];
-             mpp_buffer_write(mppbuffer, offset, frame->data[i], planesize);
-             // calculate the offset according to mppbuffer alignment not av.
-             offset += planesize;
+             mpp_buffer_write(mppbuffer, offset, frame->data[i], FFMIN(frame->buf[i]->size, planesizes[i]));
+             offset += planesizes[i];
          }
      }
 

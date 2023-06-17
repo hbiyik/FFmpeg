@@ -100,6 +100,7 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     RK_U32 rc_mode, rc_qpinit, split_mode, split_arg, split_out, fps_in_num, fps_in_den, fps_out_num, fps_out_den;
     MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     MppEncHeaderMode header_mode;
+    MppEncSeiMode sei_mode;
     MppFrameFormat mpp_format = mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK;
     int ret, max_bps, min_bps;
 
@@ -303,6 +304,13 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
          return AVERROR_UNKNOWN;
      }
 
+     sei_mode = MPP_ENC_SEI_MODE_ONE_FRAME;
+     ret = codec->mpi->control(codec->ctx, MPP_ENC_SET_SEI_CFG, &sei_mode);
+     if (ret != MPP_OK) {
+         av_log(avctx, AV_LOG_ERROR, "Failed to set sei cfg on MPI (code = %d).\n", ret);
+         return AVERROR_UNKNOWN;
+     }
+
      header_mode = MPP_ENC_HEADER_MODE_EACH_IDR;
      if (coding_type == MPP_VIDEO_CodingAVC || coding_type == MPP_VIDEO_CodingHEVC) {
          ret = codec->mpi->control(codec->ctx, MPP_ENC_SET_HEADER_MODE, &header_mode);
@@ -341,9 +349,11 @@ static int rkmpp_send_frame(AVCodecContext *avctx, const AVFrame *frame){
             else
                 mppframe = create_mpp_frame(frame->width, frame->height, avctx->pix_fmt, codec->buffer_group, NULL, frame);
         }
+
         //FIXME: handle exception if mppframe is still NULL
+        avctx->time_base.num = frame->time_base.num;
+        avctx->time_base.den = frame->time_base.den;
         mpp_frame_set_pts(mppframe, frame->pts);
-        mpp_frame_set_dts(mppframe, frame->pkt_dts);
     }
 
     // there coould be better ways to config the encoder, but lets do it this way atm.
@@ -371,7 +381,7 @@ static int rkmpp_get_packet(AVCodecContext *avctx, AVPacket *packet, int timeout
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppPacket mpppacket = NULL;
     MppMeta meta = NULL;
-    int ret, keyframe;
+    int ret, keyframe, latency;
 
     codec->mpi->control(codec->ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&timeout);
 
@@ -396,6 +406,7 @@ static int rkmpp_get_packet(AVCodecContext *avctx, AVPacket *packet, int timeout
     }
 
     av_log(avctx, AV_LOG_DEBUG, "Received a packet.\n");
+
     packet->data = mpp_packet_get_data(mpppacket);
     packet->size = mpp_packet_get_length(mpppacket);
     packet->buf = av_buffer_create(packet->data, packet->size, rkmpp_release_packet_buf,
@@ -404,12 +415,13 @@ static int rkmpp_get_packet(AVCodecContext *avctx, AVPacket *packet, int timeout
         ret = AVERROR(ENOMEM);
         goto fail;
     }
+
+	packet->time_base.num = avctx->time_base.num;
+    packet->time_base.den = avctx->time_base.den;
     packet->pts = mpp_packet_get_pts(mpppacket);
-    packet->dts = mpp_packet_get_dts(mpppacket);
-    if (packet->pts <= 0)
-        packet->pts = packet->dts;
-    if (packet->dts <= 0)
-        packet->dts = packet->pts;
+    packet->dts = mpp_packet_get_pts(mpppacket);
+    codec->frames++;
+
     meta = mpp_packet_get_meta(mpppacket);
     if (meta)
         mpp_meta_get_s32(meta, KEY_OUTPUT_INTRA, &keyframe);
