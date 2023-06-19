@@ -416,6 +416,7 @@ static int rkmpp_get_packet(AVCodecContext *avctx, AVPacket *packet, int timeout
         goto fail;
     }
 
+    //FIXME: This is low-res and does not cover b-frames.
 	packet->time_base.num = avctx->time_base.num;
     packet->time_base.den = avctx->time_base.den;
     packet->pts = mpp_packet_get_pts(mpppacket);

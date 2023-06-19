@@ -159,17 +159,17 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
         return ret;
     }
 
-    latency = rkmpp_update_latency(avctx, latency);
+
 
     // setup general frame fields
     frame->format           = avctx->pix_fmt;
     frame->width            = mpp_frame_get_width(mppframe);
     frame->height           = mpp_frame_get_height(mppframe);
-    frame->pts              = mpp_frame_get_pts(mppframe);
     frame->color_range      = mpp_frame_get_color_range(mppframe);
     frame->color_primaries  = mpp_frame_get_color_primaries(mppframe);
     frame->color_trc        = mpp_frame_get_color_trc(mppframe);
     frame->colorspace       = mpp_frame_get_colorspace(mppframe);
+    frame->pts              = mpp_frame_get_pts(mppframe);
 
     // when mpp can not determine the color space, it returns reserved (0) value
     // firefox does not understand this and instead expect unspecified (2) values
@@ -181,6 +181,8 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     frame->interlaced_frame = ((mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_DEINTERLACED);
     frame->top_field_first  = ((mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_TOP_FIRST);
 
+    codec->frames++;
+    latency = rkmpp_update_latency(avctx, latency);
     return 0;
 
 clean:
@@ -196,6 +198,16 @@ static int rkmpp_send_packet(AVCodecContext *avctx, AVPacket *packet)
     MppPacket mpkt;
     int64_t pts = packet->pts;
     int ret;
+
+    if(pts == AV_NOPTS_VALUE || pts < 0){
+        if(!codec->ptsstep){
+            int64_t x = avctx->pkt_timebase.den * (int64_t)avctx->framerate.den;
+            int64_t y = avctx->pkt_timebase.num * (int64_t)avctx->framerate.num;
+            codec->ptsstep = x / y;
+        }
+        pts = codec->pts;
+        codec->pts += codec->ptsstep;
+    }
 
     ret = mpp_packet_init(&mpkt, packet->data, packet->size);
     if (ret != MPP_OK) {

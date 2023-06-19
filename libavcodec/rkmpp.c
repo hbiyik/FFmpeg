@@ -265,7 +265,7 @@ uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency)
     if (latency == -1){
         latency = codec->last_frame_time ? curr_time - codec->last_frame_time : 0;
         codec->last_frame_time = curr_time;
-        codec->latencies[++codec->frames % RKMPP_FPS_FRAME_MACD] = latency;
+        codec->latencies[codec->frames % RKMPP_FPS_FRAME_MACD] = latency;
         return latency;
     } else if (latency == 0 || codec->frames < RKMPP_FPS_FRAME_MACD) {
         fps = -1.0f;
