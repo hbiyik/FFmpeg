@@ -105,7 +105,7 @@ uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency);
 static const AVOption options_h264_encoder[] = {
     ENCODEROPTS()
     { "profile", "Set profile restrictions (h264_rkmpp)", OFFSET(profile), AV_OPT_TYPE_INT,
-            { .i64=-1 }, -1, FF_PROFILE_H264_HIGH, VE, "profile"},
+            { .i64=FF_PROFILE_H264_HIGH }, -1, FF_PROFILE_H264_HIGH, VE, "profile"},
         { "baseline",   NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_H264_BASELINE},  INT_MIN, INT_MAX, VE, "profile" },
         { "main",       NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_H264_MAIN},      INT_MIN, INT_MAX, VE, "profile" },
         { "high",       NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_H264_HIGH},      INT_MIN, INT_MAX, VE, "profile" },
