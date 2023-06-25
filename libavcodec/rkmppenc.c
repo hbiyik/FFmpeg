@@ -30,7 +30,7 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
     void *packetpos;
     size_t packetlen;
     int ret;
-    int input_timeout = 100;
+    int input_timeout = 500;
     // ENCODER SETUP
     ret = mpp_enc_cfg_init(&codec->enccfg);
     if (ret) {
