@@ -27,6 +27,13 @@
 #define RKMPP_STRIDE_ALIGN 16
 #define RKMPP_MPPFRAME_BUFINDEX 7
 #define HDR_SIZE (1024)
+#define QMAX_H26x 51
+#define QMIN_H26x 10
+#define QMAX_VPx 127
+#define QMIN_VPx 40
+#define QMAX_JPEG 99
+#define QMIN_JPEG 1
+
 
 #define DRMFORMATNAME(buf, format) \
     buf[0] = format & 0xff; \
@@ -39,6 +46,8 @@ typedef struct {
     AVBufferRef *codec_ref;
     int rc_mode;
     int profile;
+    int qmin;
+    int qmax;
     int level;
     int coder;
     int dct8x8;
@@ -96,11 +105,15 @@ uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency);
 
 #define ENCODEROPTS() \
     { "rc_mode", "Set rate control mode", OFFSET(rc_mode), AV_OPT_TYPE_INT, \
-            { .i64 = MPP_ENC_RC_MODE_BUTT }, MPP_ENC_RC_MODE_VBR, MPP_ENC_RC_MODE_BUTT, VE, "rc_mode"}, \
+            { .i64 = MPP_ENC_RC_MODE_CBR }, MPP_ENC_RC_MODE_VBR, MPP_ENC_RC_MODE_BUTT, VE, "rc_mode"}, \
         {"VBR", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_VBR }, 0, 0, VE, "rc_mode" }, \
         {"CBR", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_CBR }, 0, 0, VE, "rc_mode" }, \
         {"CQP", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_FIXQP }, 0, 0, VE, "rc_mode" }, \
-        {"AVBR", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_AVBR }, 0, 0, VE, "rc_mode" },
+        {"AVBR", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_AVBR }, 0, 0, VE, "rc_mode" }, \
+    { "quality_min", "Minimum Quality", OFFSET(qmin), AV_OPT_TYPE_INT, \
+        { .i64=50 }, 1, 100, VE, "qmin"}, \
+    { "quality_max", "Maximum Quality", OFFSET(qmax), AV_OPT_TYPE_INT, \
+            { .i64=100 }, 1, 100, VE, "qmax"}, 
 
 static const AVOption options_h264_encoder[] = {
     ENCODEROPTS()
@@ -125,7 +138,7 @@ static const AVOption options_h264_encoder[] = {
         { "4.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 41 }, 0, 0, VE, "level"},
         { "4.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 42 }, 0, 0, VE, "level"},
         { "5",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 50 }, 0, 0, VE, "level"},
-        { "5.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 51 }, 0, 0, VE, "level"},
+        { "5.1",           NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 51 }, 0, 0, VE, "level"},
         { "5.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 52 }, 0, 0, VE, "level"},
         { "6",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 60 }, 0, 0, VE, "level"},
         { "6.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 61 }, 0, 0, VE, "level"},
@@ -157,6 +170,12 @@ DECODEROPTIONS(vp9, decoder);
 DECODEROPTIONS(mpeg1, decoder);
 DECODEROPTIONS(mpeg2, decoder);
 DECODEROPTIONS(mpeg4, decoder);
+
+static const FFCodecDefault rkmpp_enc_defaults[] = {
+    { "b",  "6M" },
+    { "g",  "60" },
+    { NULL }
+};
 
 #define RKMPP_CODEC(NAME, ID, BSFS, TYPE) \
         static const AVClass rkmpp_##NAME##_##TYPE##_class = { \
@@ -196,6 +215,7 @@ DECODEROPTIONS(mpeg4, decoder);
 #define RKMPP_ENC(NAME, ID, BSFS) \
         RKMPP_CODEC(NAME, ID, BSFS, encoder) \
         FF_CODEC_ENCODE_CB(rkmpp_encode), \
+        .defaults       = rkmpp_enc_defaults, \
         .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUYV422, \
                                                          AV_PIX_FMT_UYVY422, \
                                                          AV_PIX_FMT_NV16, \

@@ -102,7 +102,7 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     MppEncHeaderMode header_mode;
     MppEncSeiMode sei_mode;
     MppFrameFormat mpp_format = mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK;
-    int ret, max_bps, min_bps;
+    int ret, max_bps, min_bps, qmin, qmax;
 
     //prep config
     mpp_enc_cfg_set_s32(cfg, "prep:width", mpp_frame_get_width(mppframe));
@@ -133,15 +133,8 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
 
     // config rc: mode
     rc_mode = rk_context->rc_mode;
-    if(rc_mode == MPP_ENC_RC_MODE_BUTT){
-        rc_mode = MPP_ENC_RC_MODE_VBR;
-        if (avctx->flags & AV_CODEC_FLAG_QSCALE)
-            rc_mode = MPP_ENC_RC_MODE_FIXQP;
-        else if ((avctx->bit_rate > 0 && avctx->rc_max_rate == avctx->bit_rate))
-            rc_mode = MPP_ENC_RC_MODE_CBR;
-        else if (avctx->bit_rate > 0)
-            rc_mode = MPP_ENC_RC_MODE_AVBR;
-    }
+    if(rc_mode == MPP_ENC_RC_MODE_BUTT)
+        rc_mode = MPP_ENC_RC_MODE_CBR;
 
     switch(rc_mode){
         case MPP_ENC_RC_MODE_VBR:
@@ -162,6 +155,7 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     switch (rc_mode) {
         case MPP_ENC_RC_MODE_FIXQP : {
             /* do not setup bitrate on FIXQP mode */
+            min_bps =  max_bps = avctx->bit_rate;
             break;
         }
         case MPP_ENC_RC_MODE_CBR : {
@@ -188,10 +182,7 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     mpp_enc_cfg_set_s32(cfg, "rc:bps_max", max_bps);
     mpp_enc_cfg_set_s32(cfg, "rc:bps_min", min_bps);
 
-    if(rc_mode == MPP_ENC_RC_MODE_FIXQP)
-        av_log(avctx, AV_LOG_INFO, "Bitrate Target/Min/Max is set to %ld/%ld/%ld\n", avctx->bit_rate, avctx->bit_rate, avctx->bit_rate);
-    else
-        av_log(avctx, AV_LOG_INFO, "Bitrate Target/Min/Max is set to %ld/%d/%d\n", avctx->bit_rate, min_bps, max_bps);
+    av_log(avctx, AV_LOG_INFO, "Bitrate Target/Min/Max is set to %ld/%d/%d\n", avctx->bit_rate, min_bps, max_bps);
 
     // config rc: drop behaviour
     mpp_enc_cfg_set_u32(cfg, "rc:drop_mode", MPP_ENC_RC_DROP_FRM_DISABLED);
@@ -202,25 +193,26 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     switch (coding_type) {
         case MPP_VIDEO_CodingAVC :
         case MPP_VIDEO_CodingHEVC : {
+            qmax = QMIN_H26x + (100 - rk_context->qmin) * (QMAX_H26x - QMIN_H26x) / 100;
+            qmin = QMIN_H26x + (100 - rk_context->qmax) * (QMAX_H26x - QMIN_H26x) / 100;
             switch (rc_mode) {
                 case MPP_ENC_RC_MODE_FIXQP : {
-                    rc_qpinit = 10 + avctx->global_quality / (FF_QP2LAMBDA << 2);
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_init", rc_qpinit);
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_max", rc_qpinit);
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_min", rc_qpinit);
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_max_i", rc_qpinit);
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_min_i", rc_qpinit);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_init", qmin);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_max", qmin);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_min", qmin);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_max_i", qmin);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_min_i", qmin);
                     mpp_enc_cfg_set_s32(cfg, "rc:qp_ip", 0);
                     break;
                 }
                 case MPP_ENC_RC_MODE_CBR :
                 case MPP_ENC_RC_MODE_VBR :
                 case MPP_ENC_RC_MODE_AVBR : {
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_init", -1);
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_max", 51);
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_min", 10);
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_max_i",51);
-                    mpp_enc_cfg_set_s32(cfg, "rc:qp_min_i", 10);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_init", qmin);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_max", qmax);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_min", qmin);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_max_i",qmax);
+                    mpp_enc_cfg_set_s32(cfg, "rc:qp_min_i", qmin);
                     mpp_enc_cfg_set_s32(cfg, "rc:qp_ip", 2);
                     break;
                 }
@@ -233,19 +225,23 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
         }
         case MPP_VIDEO_CodingVP8 : {
             // vp8 only setup base qp range
-            mpp_enc_cfg_set_s32(cfg, "rc:qp_init", 40);
-            mpp_enc_cfg_set_s32(cfg, "rc:qp_max", 127);
-            mpp_enc_cfg_set_s32(cfg, "rc:qp_min", 0);
-            mpp_enc_cfg_set_s32(cfg, "rc:qp_max_i", 127);
-            mpp_enc_cfg_set_s32(cfg, "rc:qp_min_i", 0);
+            qmax = QMIN_VPx + (100 - rk_context->qmin) * (QMAX_VPx - QMIN_VPx) / 100;
+            qmin = QMIN_VPx + (100 - rk_context->qmax) * (QMAX_VPx - QMIN_VPx) / 100;
+            mpp_enc_cfg_set_s32(cfg, "rc:qp_init", qmin);
+            mpp_enc_cfg_set_s32(cfg, "rc:qp_max", qmax);
+            mpp_enc_cfg_set_s32(cfg, "rc:qp_min", qmin);
+            mpp_enc_cfg_set_s32(cfg, "rc:qp_max_i", qmax);
+            mpp_enc_cfg_set_s32(cfg, "rc:qp_min_i", qmin);
             mpp_enc_cfg_set_s32(cfg, "rc:qp_ip", 6);
             break;
         }
         case MPP_VIDEO_CodingMJPEG : {
+            qmax = QMIN_JPEG + (100 - rk_context->qmin) * (QMAX_JPEG - QMIN_JPEG) / 100;
+            qmin = QMIN_JPEG + (100 - rk_context->qmax) * (QMAX_JPEG- QMIN_JPEG) / 100;
             // jpeg use special codec config to control qtable
             mpp_enc_cfg_set_s32(cfg, "jpeg:q_factor", 80);
-            mpp_enc_cfg_set_s32(cfg, "jpeg:qf_max", 99);
-            mpp_enc_cfg_set_s32(cfg, "jpeg:qf_min", 1);
+            mpp_enc_cfg_set_s32(cfg, "jpeg:qf_max", qmax);
+            mpp_enc_cfg_set_s32(cfg, "jpeg:qf_min", qmin);
             break;
         }
         default : {
@@ -287,6 +283,9 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
              break;
          }
      }
+
+     av_log(avctx, AV_LOG_INFO, "Quality Min/Max is set to %d%(Quant=%d) / %d%(Quant=%d)\n",
+             rk_context->qmin, qmax, rk_context->qmax, qmin);
 
      split_mode = 0;
      split_arg = 0;
