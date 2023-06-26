@@ -216,7 +216,8 @@ static const FFCodecDefault rkmpp_enc_defaults[] = {
         RKMPP_CODEC(NAME, ID, BSFS, encoder) \
         FF_CODEC_ENCODE_CB(rkmpp_encode), \
         .defaults       = rkmpp_enc_defaults, \
-        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_YUYV422, \
+        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_NV24, \
+                                                         AV_PIX_FMT_YUYV422, \
                                                          AV_PIX_FMT_UYVY422, \
                                                          AV_PIX_FMT_NV16, \
                                                          AV_PIX_FMT_YUV422P, \

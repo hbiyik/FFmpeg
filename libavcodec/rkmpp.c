@@ -22,7 +22,7 @@
 #include <time.h>
 #include "rkmpp.h"
 
-static rkformat rkformats[11] = {
+static rkformat rkformats[13] = {
         { .av = AV_PIX_FMT_YUV420P, .mpp = MPP_FMT_YUV420P,        .drm = DRM_FORMAT_YUV420,   .rga = RGA_FORMAT_YCbCr_420_P},
         { .av = AV_PIX_FMT_YUV422P, .mpp = MPP_FMT_YUV422P,        .drm = DRM_FORMAT_YUV422,   .rga = RGA_FORMAT_YCbCr_422_P},
         { .av = AV_PIX_FMT_NV12,    .mpp = MPP_FMT_YUV420SP,       .drm = DRM_FORMAT_NV12,     .rga = RGA_FORMAT_YCbCr_420_SP},
@@ -34,11 +34,13 @@ static rkformat rkformats[11] = {
         { .av = AV_PIX_FMT_BGR565,  .mpp = MPP_FMT_BGR565,         .drm = DRM_FORMAT_RGB565,   .rga = RGA_FORMAT_BGR_565},
         { .av = AV_PIX_FMT_YUYV422, .mpp = MPP_FMT_YUV422_YUYV,    .drm = DRM_FORMAT_YUYV,     .rga = RGA_FORMAT_UYVY_422},
         { .av = AV_PIX_FMT_UYVY422, .mpp = MPP_FMT_YUV422_UYVY,    .drm = DRM_FORMAT_UYVY,     .rga = RGA_FORMAT_UNKNOWN},
+        { .av = AV_PIX_FMT_NV24,    .mpp = MPP_FMT_YUV444SP,       .drm = DRM_FORMAT_NV24,     .rga = RGA_FORMAT_UNKNOWN},
+        { .av = AV_PIX_FMT_YUV444P, .mpp = MPP_FMT_YUV444P,        .drm = DRM_FORMAT_YUV444,   .rga = RGA_FORMAT_UNKNOWN},
 };
 
 #define GETFORMAT(NAME, TYPE)\
 int rkmpp_get_##NAME##_format(rkformat *format, TYPE informat){ \
-    for(int i=0; i < 11; i++){ \
+    for(int i=0; i < 12; i++){ \
         if(rkformats[i].NAME == informat){ \
             format->av = rkformats[i].av;\
             format->mpp = rkformats[i].mpp;\

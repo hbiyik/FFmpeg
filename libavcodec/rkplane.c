@@ -304,9 +304,24 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         size = planesizes[0] + planesizes[1] + planesizes[2];
         planes = 3;
         break;
+    case AV_PIX_FMT_NV24:
+        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
+        planesizes[0] = hstride * vstride; // y plane
+        planesizes[1] = planesizes[0] * 2; // u+v plane
+        size = planesizes[0] + planesizes[1];
+        planes = 2;
+        break;
+    case AV_PIX_FMT_YUV444P:
+        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
+        planesizes[0] = hstride * vstride; // y plane
+        planesizes[1] = planesizes[0]; // u plane
+        planesizes[2] = planesizes[1]; // v plane
+        size = planesizes[0] + planesizes[1] + planesizes[2];
+        planes = 3;
+        break;
     case AV_PIX_FMT_YUYV422:
     case AV_PIX_FMT_UYVY422:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN) * 2;
+        hstride = FFALIGN(width * 2, RKMPP_STRIDE_ALIGN);
         size = hstride * vstride;
         planesizes[0] = size; // whole plane
         planes = 1;
@@ -370,8 +385,21 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
      if(frame){
          //copy frame to mppframe
          int offset = 0;
+         int bufnum = 0;
+         int plane_size = 0;
          for(int i = 0; i < planes; i++){
-             mpp_buffer_write(mppbuffer, offset, frame->data[i], FFMIN(frame->buf[i]->size, planesizes[i]));
+             if(frame->buf[i]){
+                 // each plane has its own buffer
+                 bufnum = i;
+                 plane_size = FFMIN(frame->buf[bufnum]->size, planesizes[i]);
+             } else if (i + 1 == planes){
+                 // each plane has 1 buffer and its last plane: lastplanesize = buffersize - (currentaddr-firstaddr)
+                 plane_size = FFMIN(frame->buf[bufnum]->size - (uintptr_t )frame->data[i] + (uintptr_t )frame->data[0], planesizes[i]);
+             } else {
+                 // each plane has 1 buffer and it not last or first plane
+                 plane_size = planesizes[i];
+             }
+             mpp_buffer_write(mppbuffer, offset, frame->data[i], plane_size);
              offset += planesizes[i];
          }
      }
