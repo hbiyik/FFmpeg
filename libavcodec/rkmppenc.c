@@ -97,7 +97,7 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppEncCfg cfg = codec->enccfg;
-    RK_U32 rc_mode, rc_qpinit, split_mode, split_arg, split_out, fps_in_num, fps_in_den, fps_out_num, fps_out_den;
+    RK_U32 rc_mode, rc_qpinit, split_mode, split_arg, split_out, fps_num, fps_den;
     MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     MppEncHeaderMode header_mode;
     MppEncSeiMode sei_mode;
@@ -115,19 +115,16 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     mpp_enc_cfg_set_s32(cfg, "prep:flip", 0);
 
     //rc config
-    av_reduce(&fps_in_num, &fps_in_den, avctx->time_base.den, avctx->time_base.num, 65535);
-    if (avctx->framerate.num > 0 && avctx->framerate.den > 0)
-        av_reduce(&fps_out_num, &fps_out_den, avctx->framerate.num, avctx->framerate.den, 65535);
-    else
-        av_reduce(&fps_out_num, &fps_out_den, avctx->time_base.den, avctx->time_base.num, 65535);
+    // make sure time base of avctx is synced to input frames
+    av_reduce(&fps_num, &fps_den, avctx->time_base.den, avctx->time_base.num, 65535);
 
     /* fix input / output frame rate */
     mpp_enc_cfg_set_s32(cfg, "rc:fps_in_flex", 0);
-    mpp_enc_cfg_set_s32(cfg, "rc:fps_in_num", fps_in_num);
-    mpp_enc_cfg_set_s32(cfg, "rc:fps_in_denorm", fps_in_den);
+    mpp_enc_cfg_set_s32(cfg, "rc:fps_in_num", fps_num);
+    mpp_enc_cfg_set_s32(cfg, "rc:fps_in_denorm", fps_den);
     mpp_enc_cfg_set_s32(cfg, "rc:fps_out_flex", 0);
-    mpp_enc_cfg_set_s32(cfg, "rc:fps_out_num",fps_out_num);
-    mpp_enc_cfg_set_s32(cfg, "rc:fps_out_denorm", fps_out_den);
+    mpp_enc_cfg_set_s32(cfg, "rc:fps_out_num",fps_num);
+    mpp_enc_cfg_set_s32(cfg, "rc:fps_out_denorm", fps_den);
 
     mpp_enc_cfg_set_s32(cfg, "rc:gop", FFMAX(avctx->gop_size, 1));
 
@@ -350,13 +347,21 @@ static int rkmpp_send_frame(AVCodecContext *avctx, const AVFrame *frame){
         }
 
         //FIXME: handle exception if mppframe is still NULL
-        avctx->time_base.num = frame->time_base.num;
-        avctx->time_base.den = frame->time_base.den;
+
+        //FIXME: ugly, those stuff to be done on init
+        if(frame->time_base.num && frame->time_base.den){
+            avctx->time_base.num = frame->time_base.num;
+            avctx->time_base.den = frame->time_base.den;
+        } else {
+            avctx->time_base.num = avctx->framerate.den;
+            avctx->time_base.den = avctx->framerate.num;
+        }
+
         mpp_frame_set_pts(mppframe, frame->pts);
     }
 
     // there coould be better ways to config the encoder, but lets do it this way atm.
-    // FIXME: this is ugly
+    // FIXME: this is ugly, better to do this on init
     if(!codec->hasconfig && !rkmpp_config(avctx, mppframe))
         codec->hasconfig = 1;
 
