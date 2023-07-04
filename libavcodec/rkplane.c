@@ -192,8 +192,6 @@ static int mpp_nv12_av_yuv420p_soft(MppFrame mppframe, AVFrame *frame){
 
     frame->data[0] = mpp_buffer_get_ptr(buffer); // use existing y plane
     frame->linesize[0] = hstride;
-    frame->linesize[1] = (hstride + 1) >> 1;
-    frame->linesize[2] = frame->linesize[1];
 
     // convert only uv plane from semi-planar to planar
     SplitUVPlane(frame->data[0] + hstride * vstride, hstride,
@@ -211,16 +209,16 @@ static int mpp_nv16_av_yuv420p_soft(MppFrame mppframe, AVFrame *frame){
     MppBuffer buffer = mpp_frame_get_buffer(mppframe);
     int hstride = mpp_frame_get_hor_stride(mppframe);
     int vstride = mpp_frame_get_ver_stride(mppframe);
-    char *src = mpp_buffer_get_ptr(buffer);
+    char *src = mpp_buffer_get_ptr(buffer) + hstride * vstride;
     int ret;
+
     // scale down uv plane by 2 and write it to y plane of avbuffer temporarily
-    src += hstride * vstride;
     UVScale(src, hstride, frame->width, frame->height,
-            frame->data[0], hstride,
+            frame->data[0], frame->linesize[0],
             (frame->width + 1) >> 1, (frame->height + 1) >> 1, kFilterNone);
 
     // convert uv plane from semi-planar to planar
-    SplitUVPlane(frame->data[0], hstride,
+    SplitUVPlane(frame->data[0], frame->linesize[0],
             frame->data[1], frame->linesize[1], frame->data[2], frame->linesize[2],
             (frame->width + 1) >> 1, (frame->height + 1) >> 1);
 
@@ -239,18 +237,17 @@ static int mpp_nv16_av_nv12_soft(MppFrame mppframe, AVFrame *frame){
     MppBuffer buffer = mpp_frame_get_buffer(mppframe);
     int hstride = mpp_frame_get_hor_stride(mppframe);
     int vstride = mpp_frame_get_ver_stride(mppframe);
+    char *src = mpp_buffer_get_ptr(buffer) + hstride * vstride;
     int ret;
 
-    frame->data[0] = mpp_buffer_get_ptr(buffer);
-    frame->linesize[0] = hstride;
-
     // scale down uv plane by 2 and write it to uv plane of avbuffer
-    UVScale(frame->data[0] + hstride * vstride, hstride, frame->width, frame->height,
-            frame->data[1], hstride,
+    UVScale(src, hstride, frame->width, frame->height,
+            frame->data[1], frame->linesize[0],
             (frame->width + 1) >> 1, (frame->height + 1) >> 1, kFilterNone);
 
     // use existing y plane from mppbuffer
-    frame->linesize[1] = hstride;
+    frame->data[0] = mpp_buffer_get_ptr(buffer);
+    frame->linesize[0] = hstride;
 
     ret = set_mppframe_to_avbuff(mppframe, frame);
     if(ret >= 0)
