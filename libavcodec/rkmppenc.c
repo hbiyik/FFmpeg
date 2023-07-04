@@ -24,11 +24,11 @@
 int rkmpp_init_encoder(AVCodecContext *avctx){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-
+    MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     RK_U8 enc_hdr_buf[HDR_SIZE];
     MppPacket packet = NULL;
-    void *packetpos;
     size_t packetlen;
+    void *packetpos;
     int ret;
     int input_timeout = 500;
     // ENCODER SETUP
@@ -46,40 +46,43 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
         goto fail;
     }
 
-    // set extradata
-    memset(enc_hdr_buf, 0 , HDR_SIZE);
+    if(coding_type == MPP_VIDEO_CodingAVC){
+        // set extradata
+        memset(enc_hdr_buf, 0 , HDR_SIZE);
 
-    ret = mpp_packet_init(&packet, (void *)enc_hdr_buf, HDR_SIZE);
-    if (!packet) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to init extra info packet (code = %d).\n", ret);
-        ret = AVERROR_UNKNOWN;
-        goto fail;
-    }
+        ret = mpp_packet_init(&packet, (void *)enc_hdr_buf, HDR_SIZE);
+        if (!packet) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to init extra info packet (code = %d).\n", ret);
+            ret = AVERROR_UNKNOWN;
+            goto fail;
+        }
 
-    mpp_packet_set_length(packet, 0);
-    ret = codec->mpi->control(codec->ctx, MPP_ENC_GET_HDR_SYNC, packet);
-    if (ret != MPP_OK) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to get extra info on MPI (code = %d).\n", ret);
-        ret = AVERROR_UNKNOWN;
-        goto fail;
-    }
+        mpp_packet_set_length(packet, 0);
+        ret = codec->mpi->control(codec->ctx, MPP_ENC_GET_HDR_SYNC, packet);
+        if (ret != MPP_OK) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to get extra info on MPI (code = %d).\n", ret);
+            ret = AVERROR_UNKNOWN;
+            goto fail;
+        }
 
-    /* get and write sps/pps for H.264 */
-    packetpos = mpp_packet_get_pos(packet);
-    packetlen  = mpp_packet_get_length(packet);
-    if (avctx->extradata != NULL && avctx->extradata_size != packetlen) {
-        av_free(avctx->extradata);
-        avctx->extradata = NULL;
+        /* get and write sps/pps for H.264/H.265 */
+        packetpos = mpp_packet_get_pos(packet);
+        packetlen  = mpp_packet_get_length(packet);
+
+        if (avctx->extradata != NULL) {
+            av_free(avctx->extradata);
+            avctx->extradata = NULL;
+        }
+        avctx->extradata = av_malloc(packetlen + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (avctx->extradata == NULL) {
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
+        avctx->extradata_size = packetlen + AV_INPUT_BUFFER_PADDING_SIZE;
+        memcpy(avctx->extradata, packetpos, packetlen);
+        memset(avctx->extradata + packetlen, 0, AV_INPUT_BUFFER_PADDING_SIZE);
+        mpp_packet_deinit(&packet);
     }
-    if (!avctx->extradata)
-        avctx->extradata = av_malloc(packetlen);
-    if (avctx->extradata == NULL) {
-        ret = AVERROR(ENOMEM);
-        goto fail;
-    }
-    avctx->extradata_size = packetlen;
-    memcpy(avctx->extradata, packetpos, packetlen);
-    mpp_packet_deinit(&packet);
 
     codec->mpi->control(codec->ctx, MPP_SET_INPUT_TIMEOUT, &input_timeout);
     avctx->profile = rk_context->profile;
@@ -300,7 +303,7 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
          return AVERROR_UNKNOWN;
      }
 
-     sei_mode = MPP_ENC_SEI_MODE_ONE_FRAME;
+     sei_mode = MPP_ENC_SEI_MODE_DISABLE;
      ret = codec->mpi->control(codec->ctx, MPP_ENC_SET_SEI_CFG, &sei_mode);
      if (ret != MPP_OK) {
          av_log(avctx, AV_LOG_ERROR, "Failed to set sei cfg on MPI (code = %d).\n", ret);
