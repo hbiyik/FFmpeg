@@ -59,7 +59,6 @@ typedef struct {
     MppBufferGroup buffer_group;
     MppCtxType mppctxtype;
     MppEncCfg enccfg;
-    uint32_t hasconfig;
     int64_t ptsstep;
     int64_t pts;
 

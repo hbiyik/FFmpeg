@@ -21,82 +21,39 @@
 #include "rkmpp.h"
 #include "rkplane.h"
 
-int rkmpp_init_encoder(AVCodecContext *avctx){
+static int rkmpp_config_withframe(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    MppCodingType coding_type = rkmpp_get_codingtype(avctx);
-    RK_U8 enc_hdr_buf[HDR_SIZE];
-    MppPacket packet = NULL;
-    size_t packetlen;
-    void *packetpos;
+    MppEncCfg cfg = codec->enccfg;
+    MppFrameFormat mpp_format = MPP_FMT_BUTT;
     int ret;
-    int input_timeout = 500;
-    // ENCODER SETUP
-    ret = mpp_enc_cfg_init(&codec->enccfg);
-    if (ret) {
-        av_log(avctx, AV_LOG_ERROR, "Codec failed to initialize encoder config (code = %d)\n", ret);
-        ret = AVERROR_UNKNOWN;
-        goto fail;
-    }
 
-    ret = codec->mpi->control(codec->ctx, MPP_ENC_GET_CFG, codec->enccfg);
-    if (ret) {
-        av_log(avctx, AV_LOG_ERROR, "Codec failed to get encoder config (code = %d)\n", ret);
-        ret = AVERROR_UNKNOWN;
-        goto fail;
-    }
-
-    if(coding_type == MPP_VIDEO_CodingAVC || coding_type == MPP_VIDEO_CodingHEVC){
-        // set extradata
-        memset(enc_hdr_buf, 0 , HDR_SIZE);
-
-        ret = mpp_packet_init(&packet, (void *)enc_hdr_buf, HDR_SIZE);
-        if (!packet) {
-            av_log(avctx, AV_LOG_ERROR, "Failed to init extra info packet (code = %d).\n", ret);
-            ret = AVERROR_UNKNOWN;
-            goto fail;
+    mpp_enc_cfg_get_s32(cfg, "prep:format", &mpp_format);
+    if(mpp_format == MPP_FMT_BUTT){
+        if(frame->time_base.num && frame->time_base.den){
+            avctx->time_base.num = frame->time_base.num;
+            avctx->time_base.den = frame->time_base.den;
+        } else {
+            avctx->time_base.num = avctx->framerate.den;
+            avctx->time_base.den = avctx->framerate.num;
         }
 
-        mpp_packet_set_length(packet, 0);
-        ret = codec->mpi->control(codec->ctx, MPP_ENC_GET_HDR_SYNC, packet);
+        mpp_enc_cfg_set_s32(cfg, "prep:width", mpp_frame_get_width(mppframe));
+        mpp_enc_cfg_set_s32(cfg, "prep:height", mpp_frame_get_height(mppframe));
+        mpp_enc_cfg_set_s32(cfg, "prep:hor_stride", mpp_frame_get_hor_stride(mppframe));
+        mpp_enc_cfg_set_s32(cfg, "prep:ver_stride", mpp_frame_get_ver_stride(mppframe));
+        mpp_enc_cfg_set_s32(cfg, "prep:format", mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK);
+        ret = codec->mpi->control(codec->ctx, MPP_ENC_SET_CFG, cfg);
         if (ret != MPP_OK) {
-            av_log(avctx, AV_LOG_ERROR, "Failed to get extra info on MPI (code = %d).\n", ret);
-            ret = AVERROR_UNKNOWN;
-            goto fail;
+            av_log(avctx, AV_LOG_ERROR, "Failed to set cfg on MPI (code = %d).\n", ret);
+            return AVERROR_UNKNOWN;
         }
-
-        /* get and write sps/pps for H.264/H.265 */
-        packetpos = mpp_packet_get_pos(packet);
-        packetlen  = mpp_packet_get_length(packet);
-
-        if (avctx->extradata != NULL) {
-            av_free(avctx->extradata);
-            avctx->extradata = NULL;
-        }
-        avctx->extradata = av_malloc(packetlen + AV_INPUT_BUFFER_PADDING_SIZE);
-        if (avctx->extradata == NULL) {
-            ret = AVERROR(ENOMEM);
-            goto fail;
-        }
-        avctx->extradata_size = packetlen + AV_INPUT_BUFFER_PADDING_SIZE;
-        memcpy(avctx->extradata, packetpos, packetlen);
-        memset(avctx->extradata + packetlen, 0, AV_INPUT_BUFFER_PADDING_SIZE);
-        mpp_packet_deinit(&packet);
-        avctx->profile = rk_context->profile;
-        avctx->level = rk_context->level;
+        return 0;
     }
-
-    codec->mpi->control(codec->ctx, MPP_SET_INPUT_TIMEOUT, &input_timeout);
-    return 0;
-
-fail:
-    av_log(avctx, AV_LOG_ERROR, "Failed to initialize RKMPP Codec.\n");
-    if(packet)
-        mpp_packet_deinit(&packet);
-    return ret;
+    return -1;
 }
 
-static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
+static int rkmpp_config(AVCodecContext *avctx){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppEncCfg cfg = codec->enccfg;
@@ -104,15 +61,15 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     MppEncHeaderMode header_mode;
     MppEncSeiMode sei_mode;
-    MppFrameFormat mpp_format = mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK;
     int ret, max_bps, min_bps, qmin, qmax;
 
     //prep config
-    mpp_enc_cfg_set_s32(cfg, "prep:width", mpp_frame_get_width(mppframe));
-    mpp_enc_cfg_set_s32(cfg, "prep:height", mpp_frame_get_height(mppframe));
-    mpp_enc_cfg_set_s32(cfg, "prep:hor_stride", mpp_frame_get_hor_stride(mppframe));
-    mpp_enc_cfg_set_s32(cfg, "prep:ver_stride", mpp_frame_get_ver_stride(mppframe));
-    mpp_enc_cfg_set_s32(cfg, "prep:format", mpp_format);
+    mpp_enc_cfg_set_s32(cfg, "prep:width", avctx->width);
+    mpp_enc_cfg_set_s32(cfg, "prep:height", avctx->height);
+    mpp_enc_cfg_set_s32(cfg, "prep:hor_stride", FFALIGN(avctx->width, RKMPP_STRIDE_ALIGN));
+    mpp_enc_cfg_set_s32(cfg, "prep:ver_stride", FFALIGN(avctx->height, RKMPP_STRIDE_ALIGN));
+    // later to be reconfigured with the first frame received
+    mpp_enc_cfg_set_s32(cfg, "prep:format", MPP_FMT_BUTT);
     mpp_enc_cfg_set_s32(cfg, "prep:mirroring", 0);
     mpp_enc_cfg_set_s32(cfg, "prep:rotation", 0);
     mpp_enc_cfg_set_s32(cfg, "prep:flip", 0);
@@ -253,6 +210,8 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
      mpp_enc_cfg_set_s32(cfg, "codec:type", coding_type);
      switch (coding_type) {
          case MPP_VIDEO_CodingAVC : {
+             avctx->profile = rk_context->profile;
+             avctx->level = rk_context->level;
              mpp_enc_cfg_set_s32(cfg, "h264:profile", avctx->profile);
              mpp_enc_cfg_set_s32(cfg, "h264:level", avctx->level);
              mpp_enc_cfg_set_s32(cfg, "h264:cabac_en", rk_context->coder);
@@ -275,6 +234,8 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
              break;
          }
          case MPP_VIDEO_CodingHEVC : {
+             avctx->profile = rk_context->profile;
+             avctx->level = rk_context->level;
              mpp_enc_cfg_set_s32(cfg, "h265:profile", avctx->profile);
              mpp_enc_cfg_set_s32(cfg, "h265:level", avctx->level);
              switch(avctx->profile){
@@ -331,6 +292,83 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
     return 0;
 }
 
+int rkmpp_init_encoder(AVCodecContext *avctx){
+    RKMPPCodecContext *rk_context = avctx->priv_data;
+    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
+    MppCodingType coding_type = rkmpp_get_codingtype(avctx);
+    RK_U8 enc_hdr_buf[HDR_SIZE];
+    MppPacket packet = NULL;
+    size_t packetlen;
+    void *packetpos;
+    int ret;
+    int input_timeout = 500;
+
+    // ENCODER SETUP
+    ret = mpp_enc_cfg_init(&codec->enccfg);
+    if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "Codec failed to initialize encoder config (code = %d)\n", ret);
+        ret = AVERROR_UNKNOWN;
+        goto fail;
+    }
+
+    ret = codec->mpi->control(codec->ctx, MPP_ENC_GET_CFG, codec->enccfg);
+    if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "Codec failed to get encoder config (code = %d)\n", ret);
+        ret = AVERROR_UNKNOWN;
+        goto fail;
+    }
+
+    if(rkmpp_config(avctx))
+        goto fail;
+
+    // copy sps/pps/vps to extradata for h26x
+    if(coding_type == MPP_VIDEO_CodingAVC || coding_type == MPP_VIDEO_CodingHEVC){
+        memset(enc_hdr_buf, 0 , HDR_SIZE);
+
+        ret = mpp_packet_init(&packet, (void *)enc_hdr_buf, HDR_SIZE);
+        if (!packet) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to init extra info packet (code = %d).\n", ret);
+            ret = AVERROR_UNKNOWN;
+            goto fail;
+        }
+
+        mpp_packet_set_length(packet, 0);
+        ret = codec->mpi->control(codec->ctx, MPP_ENC_GET_HDR_SYNC, packet);
+        if (ret != MPP_OK) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to get extra info on MPI (code = %d).\n", ret);
+            ret = AVERROR_UNKNOWN;
+            goto fail;
+        }
+
+        /* get and write sps/pps for H.264/H.265 */
+        packetpos = mpp_packet_get_pos(packet);
+        packetlen  = mpp_packet_get_length(packet);
+
+        if (avctx->extradata != NULL) {
+            av_free(avctx->extradata);
+            avctx->extradata = NULL;
+        }
+        avctx->extradata = av_malloc(packetlen + AV_INPUT_BUFFER_PADDING_SIZE);
+        if (avctx->extradata == NULL) {
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
+        avctx->extradata_size = packetlen + AV_INPUT_BUFFER_PADDING_SIZE;
+        memcpy(avctx->extradata, packetpos, packetlen);
+        memset(avctx->extradata + packetlen, 0, AV_INPUT_BUFFER_PADDING_SIZE);
+        mpp_packet_deinit(&packet);
+    }
+
+    codec->mpi->control(codec->ctx, MPP_SET_INPUT_TIMEOUT, &input_timeout);
+    return 0;
+
+fail:
+    av_log(avctx, AV_LOG_ERROR, "Failed to initialize RKMPP Codec.\n");
+    if(packet)
+        mpp_packet_deinit(&packet);
+    return ret;
+}
+
 static void rkmpp_release_packet_buf(void *opaque, uint8_t *data){
     MppPacket mpppacket = opaque;
     mpp_packet_deinit(&mpppacket);
@@ -357,25 +395,10 @@ static int rkmpp_send_frame(AVCodecContext *avctx, const AVFrame *frame){
             else
                 mppframe = create_mpp_frame(frame->width, frame->height, avctx->pix_fmt, codec->buffer_group, NULL, frame);
         }
-
-        //FIXME: handle exception if mppframe is still NULL
-
-        //FIXME: ugly, those stuff to be done on init
-        if(frame->time_base.num && frame->time_base.den){
-            avctx->time_base.num = frame->time_base.num;
-            avctx->time_base.den = frame->time_base.den;
-        } else {
-            avctx->time_base.num = avctx->framerate.den;
-            avctx->time_base.den = avctx->framerate.num;
-        }
-
         mpp_frame_set_pts(mppframe, frame->pts);
     }
 
-    // there coould be better ways to config the encoder, but lets do it this way atm.
-    // FIXME: this is ugly, better to do this on init
-    if(!codec->hasconfig && !rkmpp_config(avctx, mppframe))
-        codec->hasconfig = 1;
+    rkmpp_config_withframe(avctx, mppframe, frame);
 
     // put the frame in encoder
     ret = codec->mpi->encode_put_frame(codec->ctx, mppframe);
