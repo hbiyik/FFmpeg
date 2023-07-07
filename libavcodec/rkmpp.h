@@ -117,12 +117,12 @@ uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency);
 
 static const AVOption options_h264_encoder[] = {
     ENCODEROPTS()
-    { "profile", "Set profile restrictions (h264_rkmpp)", OFFSET(profile), AV_OPT_TYPE_INT,
+    { "profile", "Set profile restrictions", OFFSET(profile), AV_OPT_TYPE_INT,
             { .i64=FF_PROFILE_H264_HIGH }, -1, FF_PROFILE_H264_HIGH, VE, "profile"},
         { "baseline",   NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_H264_BASELINE},  INT_MIN, INT_MAX, VE, "profile" },
         { "main",       NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_H264_MAIN},      INT_MIN, INT_MAX, VE, "profile" },
         { "high",       NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_H264_HIGH},      INT_MIN, INT_MAX, VE, "profile" },
-    { "level", "Compression Level (h264_rkmpp)", OFFSET(level), AV_OPT_TYPE_INT,
+    { "level", "Compression Level", OFFSET(level), AV_OPT_TYPE_INT,
             { .i64 = 51 }, FF_LEVEL_UNKNOWN, 0xff, VE, "level"},
         { "1",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 10 }, 0, 0, VE, "level"},
         { "1.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 11 }, 0, 0, VE, "level"},
@@ -153,6 +153,26 @@ static const AVOption options_h264_encoder[] = {
 
 static const AVOption options_hevc_encoder[] = {
     ENCODEROPTS()
+    { "profile", "Set profile restrictions", OFFSET(profile), AV_OPT_TYPE_INT,
+            { .i64=FF_PROFILE_HEVC_MAIN }, -1, FF_PROFILE_HEVC_MAIN_10, VE, "profile"},
+        { "main",   NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_HEVC_MAIN},  INT_MIN, INT_MAX, VE, "profile" },
+        { "main10", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_HEVC_MAIN_10},      INT_MIN, INT_MAX, VE, "profile" },
+    { "level", "Compression Level", OFFSET(level), AV_OPT_TYPE_INT,
+            { .i64 = 255 }, FF_LEVEL_UNKNOWN, 0xff, VE, "level"},
+        { "1",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 30 }, 0, 0, VE, "level"},
+        { "2",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 60 }, 0, 0, VE, "level"},
+        { "2.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 63 }, 0, 0, VE, "level"},
+        { "3",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 90 }, 0, 0, VE, "level"},
+        { "3.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 93 }, 0, 0, VE, "level"},
+        { "4",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 120 }, 0, 0, VE, "level"},
+        { "4.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 123 }, 0, 0, VE, "level"},
+        { "5",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 150 }, 0, 0, VE, "level"},
+        { "5.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 153 }, 0, 0, VE, "level"},
+        { "5.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 156 }, 0, 0, VE, "level"},
+        { "6",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 180 }, 0, 0, VE, "level"},
+        { "6.1",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 183 }, 0, 0, VE, "level"},
+        { "6.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 186 }, 0, 0, VE, "level"},
+        { "8.5",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 255 }, 0, 0, VE, "level"},
     { NULL }
 };
 

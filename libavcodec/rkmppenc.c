@@ -46,7 +46,7 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
         goto fail;
     }
 
-    if(coding_type == MPP_VIDEO_CodingAVC){
+    if(coding_type == MPP_VIDEO_CodingAVC || coding_type == MPP_VIDEO_CodingHEVC){
         // set extradata
         memset(enc_hdr_buf, 0 , HDR_SIZE);
 
@@ -82,11 +82,11 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
         memcpy(avctx->extradata, packetpos, packetlen);
         memset(avctx->extradata + packetlen, 0, AV_INPUT_BUFFER_PADDING_SIZE);
         mpp_packet_deinit(&packet);
+        avctx->profile = rk_context->profile;
+        avctx->level = rk_context->level;
     }
 
     codec->mpi->control(codec->ctx, MPP_SET_INPUT_TIMEOUT, &input_timeout);
-    avctx->profile = rk_context->profile;
-    avctx->level = rk_context->level;
     return 0;
 
 fail:
@@ -274,7 +274,16 @@ static int rkmpp_config(AVCodecContext *avctx, MppFrame mppframe){
                  av_log(avctx, AV_LOG_INFO, "Coder is set to CAVLC\n");
              break;
          }
-         case MPP_VIDEO_CodingHEVC :
+         case MPP_VIDEO_CodingHEVC : {
+             mpp_enc_cfg_set_s32(cfg, "h265:profile", avctx->profile);
+             mpp_enc_cfg_set_s32(cfg, "h265:level", avctx->level);
+             switch(avctx->profile){
+                 case FF_PROFILE_HEVC_MAIN: av_log(avctx, AV_LOG_INFO, "Profile is set to MAIN\n"); break;
+                 case FF_PROFILE_HEVC_MAIN_10: av_log(avctx, AV_LOG_INFO, "Profile is set to MAIN 10\n"); break;
+             }
+             av_log(avctx, AV_LOG_INFO, "Level is set to %d\n", avctx->level == 255 ? 85 : avctx->level / 3);
+             break;
+         }
          case MPP_VIDEO_CodingMJPEG :
          case MPP_VIDEO_CodingVP8 :
              break;
