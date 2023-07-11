@@ -26,10 +26,10 @@ static int rkmpp_config_withframe(AVCodecContext *avctx, MppFrame mppframe, AVFr
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppEncCfg cfg = codec->enccfg;
     MppFrameFormat mpp_format = MPP_FMT_BUTT;
-    int ret;
 
-    mpp_enc_cfg_get_s32(cfg, "prep:format", &mpp_format);
+    mpp_enc_cfg_get_s32(cfg, "prep:format", (RK_S32 *)&mpp_format);
     if(mpp_format == MPP_FMT_BUTT){
+        int ret;
         if(frame->time_base.num && frame->time_base.den){
             avctx->time_base.num = frame->time_base.num;
             avctx->time_base.den = frame->time_base.den;
@@ -57,7 +57,7 @@ static int rkmpp_config(AVCodecContext *avctx){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppEncCfg cfg = codec->enccfg;
-    RK_U32 rc_mode, rc_qpinit, split_mode, split_arg, split_out, fps_num, fps_den;
+    RK_U32 rc_mode, split_mode, split_arg, split_out, fps_num, fps_den;
     MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     MppEncHeaderMode header_mode;
     MppEncSeiMode sei_mode;
@@ -254,7 +254,7 @@ static int rkmpp_config(AVCodecContext *avctx){
          }
      }
 
-     av_log(avctx, AV_LOG_INFO, "Quality Min/Max is set to %d%(Quant=%d) / %d%(Quant=%d)\n",
+     av_log(avctx, AV_LOG_INFO, "Quality Min/Max is set to %d%%(Quant=%d) / %d%%(Quant=%d)\n",
              rk_context->qmin, qmax, rk_context->qmax, qmin);
 
      split_mode = 0;
@@ -374,7 +374,7 @@ static void rkmpp_release_packet_buf(void *opaque, uint8_t *data){
     mpp_packet_deinit(&mpppacket);
 }
 
-static int rkmpp_send_frame(AVCodecContext *avctx, const AVFrame *frame){
+static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame mppframe = NULL;
@@ -387,12 +387,20 @@ static int rkmpp_send_frame(AVCodecContext *avctx, const AVFrame *frame){
         mpp_frame_set_eos(mppframe, 1);
     } else {
         if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+            // the frame is coming from a DRMPRIME enabled decoder, no copy necessary
+            // just import existing fd and buffer to mmpp
             mppframe = import_drm_to_mpp(avctx, frame);
         } else {
+            // the frame is coming from a RKMPP decoder, no copy necessary
+            // use existing mppframe which is atatched to
+            // RKMPP_MPPFRAME_BUFINDEX of the frame buffers
+            // those frames need to be cleaned by the decoder itself therefore dont clean them
             mppframe = get_mppframe_from_av(frame);
             if(mppframe)
                 keepframe = 1;
             else
+                // soft frames needs to be copied to a buffer region where mpp supports.
+                // a copy is necessary here
                 mppframe = create_mpp_frame(frame->width, frame->height, avctx->pix_fmt, codec->buffer_group, NULL, frame);
         }
         mpp_frame_set_pts(mppframe, frame->pts);
@@ -420,7 +428,7 @@ static int rkmpp_get_packet(AVCodecContext *avctx, AVPacket *packet, int timeout
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppPacket mpppacket = NULL;
     MppMeta meta = NULL;
-    int ret, keyframe, latency;
+    int ret, keyframe=0;
 
     codec->mpi->control(codec->ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&timeout);
 
@@ -479,7 +487,7 @@ fail:
 int rkmpp_encode(AVCodecContext *avctx, AVPacket *packet, const AVFrame *frame, int *got_packet){
     int ret;
 
-    ret = rkmpp_send_frame(avctx, frame);
+    ret = rkmpp_send_frame(avctx, (AVFrame *)frame);
     if (ret)
         return ret;
 

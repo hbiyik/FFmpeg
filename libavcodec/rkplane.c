@@ -209,7 +209,7 @@ static int mpp_nv16_av_yuv420p_soft(MppFrame mppframe, AVFrame *frame){
     MppBuffer buffer = mpp_frame_get_buffer(mppframe);
     int hstride = mpp_frame_get_hor_stride(mppframe);
     int vstride = mpp_frame_get_ver_stride(mppframe);
-    char *src = mpp_buffer_get_ptr(buffer) + hstride * vstride;
+    char *src = (char *)mpp_buffer_get_ptr(buffer) + hstride * vstride;
     int ret;
 
     // scale down uv plane by 2 and write it to y plane of avbuffer temporarily
@@ -237,7 +237,7 @@ static int mpp_nv16_av_nv12_soft(MppFrame mppframe, AVFrame *frame){
     MppBuffer buffer = mpp_frame_get_buffer(mppframe);
     int hstride = mpp_frame_get_hor_stride(mppframe);
     int vstride = mpp_frame_get_ver_stride(mppframe);
-    char *src = mpp_buffer_get_ptr(buffer) + hstride * vstride;
+    char *src = (char *)mpp_buffer_get_ptr(buffer) + hstride * vstride;
     int ret;
 
     // scale down uv plane by 2 and write it to uv plane of avbuffer
@@ -383,7 +383,7 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
          //copy frame to mppframe
          int offset = 0;
          int bufnum = 0;
-         int plane_size = 0;
+         int plane_size;
          for(int i = 0; i < planes; i++){
              if(frame->buf[i]){
                  // each plane has its own buffer
@@ -499,7 +499,8 @@ int convert_mpp_to_av(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame,
         }
     } else{
         ret = set_mppframe_to_avbuff(mppframe, frame);
-        frame->data[RKMPP_MPPFRAME_BUFINDEX] = frame->buf[ret]->data;
+        if(ret >= 0)
+            frame->data[RKMPP_MPPFRAME_BUFINDEX] = frame->buf[ret]->data;
     }
 
     if (ret < 0)
@@ -507,7 +508,7 @@ int convert_mpp_to_av(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame,
     return ret;
 }
 
-MppFrame import_drm_to_mpp(AVCodecContext *avctx, const AVFrame *frame){
+MppFrame import_drm_to_mpp(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame mppframe = NULL;

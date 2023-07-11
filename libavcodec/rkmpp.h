@@ -97,7 +97,7 @@ int rkmpp_init_codec(AVCodecContext *avctx);
 int rkmpp_close_codec(AVCodecContext *avctx);
 void rkmpp_release_codec(void *opaque, uint8_t *data);
 void rkmpp_flush(AVCodecContext *avctx);
-uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency);
+uint64_t rkmpp_update_latency(AVCodecContext *avctx, int latency);
 
 #define OFFSET(x) offsetof(RKMPPCodecContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM

@@ -55,7 +55,7 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
     av_buffer_unref(&codec->hwframes_ref);
     codec->hwframes_ref = av_hwframe_ctx_alloc(codec->hwdevice_ref);
     if (!codec->hwframes_ref) {
-        ret = AVERROR(ENOMEM);
+        return AVERROR(ENOMEM);
     }
 
     return 0;
@@ -182,7 +182,7 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     frame->top_field_first  = ((mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_TOP_FIRST);
 
     codec->frames++;
-    latency = rkmpp_update_latency(avctx, latency);
+    rkmpp_update_latency(avctx, latency);
     return 0;
 
 clean:

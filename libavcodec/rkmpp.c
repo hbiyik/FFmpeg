@@ -251,7 +251,7 @@ void rkmpp_flush(AVCodecContext *avctx)
     av_frame_unref(&codec->lastframe);
 }
 
-uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency)
+uint64_t rkmpp_update_latency(AVCodecContext *avctx, int latency)
 {
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
@@ -278,7 +278,7 @@ uint64_t rkmpp_update_latency(AVCodecContext *avctx, uint64_t latency)
         fps = RKMPP_FPS_FRAME_MACD * 1000000.0f / fps;
     }
     av_log(avctx, AV_LOG_INFO,
-           "[FFMPEG RKMPP] FPS(MACD%d): %6.1f || Frames: %" PRIu64 " || Latency: %" PRIu64 "us || Buffer Delay %" PRIu64 "us\n",
+           "[FFMPEG RKMPP] FPS(MACD%d): %6.1f || Frames: %" PRIu64 " || Latency: %d us || Buffer Delay %" PRIu64 "us\n",
            RKMPP_FPS_FRAME_MACD, fps, codec->frames, latency, (uint64_t)(curr_time - codec->last_frame_time));
 
     return 0;
