@@ -59,6 +59,7 @@ typedef struct {
     MppBufferGroup buffer_group;
     MppCtxType mppctxtype;
     MppEncCfg enccfg;
+    int recfg;
     int64_t ptsstep;
     int64_t pts;
 
@@ -173,6 +174,10 @@ static const AVOption options_hevc_encoder[] = {
         { "6.2",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 186 }, 0, 0, VE, "level"},
         { "8.5",        NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 255 }, 0, 0, VE, "level"},
     { NULL }
+};
+
+static const AVOption options_vp8_encoder[] = {
+    ENCODEROPTS()
 };
 
 #define DECODEROPTIONS(NAME, TYPE) \

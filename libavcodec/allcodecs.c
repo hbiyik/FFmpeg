@@ -44,6 +44,7 @@ extern const FFCodec ff_mpeg4_rkmpp_decoder;
 extern const FFCodec ff_vp8_rkmpp_decoder;
 extern const FFCodec ff_vp9_rkmpp_decoder;
 
+extern const FFCodec ff_vp8_rkmpp_encoder;
 extern const FFCodec ff_h264_rkmpp_encoder;
 extern const FFCodec ff_hevc_rkmpp_encoder;
 

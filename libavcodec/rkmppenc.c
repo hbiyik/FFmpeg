@@ -25,10 +25,8 @@ static int rkmpp_config_withframe(AVCodecContext *avctx, MppFrame mppframe, AVFr
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppEncCfg cfg = codec->enccfg;
-    MppFrameFormat mpp_format = MPP_FMT_BUTT;
 
-    mpp_enc_cfg_get_s32(cfg, "prep:format", (RK_S32 *)&mpp_format);
-    if(mpp_format == MPP_FMT_BUTT){
+    if(codec->recfg == 0){
         int ret;
         if(frame->time_base.num && frame->time_base.den){
             avctx->time_base.num = frame->time_base.num;
@@ -48,6 +46,7 @@ static int rkmpp_config_withframe(AVCodecContext *avctx, MppFrame mppframe, AVFr
             av_log(avctx, AV_LOG_ERROR, "Failed to set cfg on MPI (code = %d).\n", ret);
             return AVERROR_UNKNOWN;
         }
+        codec->recfg = 1;
         return 0;
     }
     return -1;
@@ -69,7 +68,7 @@ static int rkmpp_config(AVCodecContext *avctx){
     mpp_enc_cfg_set_s32(cfg, "prep:hor_stride", FFALIGN(avctx->width, RKMPP_STRIDE_ALIGN));
     mpp_enc_cfg_set_s32(cfg, "prep:ver_stride", FFALIGN(avctx->height, RKMPP_STRIDE_ALIGN));
     // later to be reconfigured with the first frame received
-    mpp_enc_cfg_set_s32(cfg, "prep:format", MPP_FMT_BUTT);
+    mpp_enc_cfg_set_s32(cfg, "prep:format", MPP_FMT_YUV420SP);
     mpp_enc_cfg_set_s32(cfg, "prep:mirroring", 0);
     mpp_enc_cfg_set_s32(cfg, "prep:rotation", 0);
     mpp_enc_cfg_set_s32(cfg, "prep:flip", 0);
@@ -247,6 +246,7 @@ static int rkmpp_config(AVCodecContext *avctx){
          }
          case MPP_VIDEO_CodingMJPEG :
          case MPP_VIDEO_CodingVP8 :
+             mpp_enc_cfg_set_s32(cfg, "vp8:disable_ivf", 1);
              break;
          default : {
              av_log(avctx, AV_LOG_ERROR, "Unsupported coding type for config (code = %d).\n", coding_type);
@@ -504,3 +504,4 @@ int rkmpp_encode(AVCodecContext *avctx, AVPacket *packet, const AVFrame *frame, 
 
 RKMPP_ENC(h264, AV_CODEC_ID_H264, "h264_mp4toannexb")
 RKMPP_ENC(hevc, AV_CODEC_ID_HEVC, "hevc_mp4toannexb")
+RKMPP_ENC(vp8, AV_CODEC_ID_VP8, NULL)
