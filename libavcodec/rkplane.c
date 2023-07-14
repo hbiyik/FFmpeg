@@ -125,7 +125,7 @@ static int rga_scale(uint64_t rga_fd,
     return ioctl(rga_fd, RGA_BLIT_SYNC, &req);
 }
 
-static int rga_convert_mpp_mpp(AVCodecContext *avctx, MppFrame in_mppframe, MppFrame out_mppframe){
+int rga_convert_mpp_mpp(AVCodecContext *avctx, MppFrame in_mppframe, MppFrame out_mppframe){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     rkformat informat, outformat;

@@ -25,8 +25,10 @@
 
 #define RKMPP_FPS_FRAME_MACD 30
 #define RKMPP_STRIDE_ALIGN 16
+#define RKMPP_RGA_MIN_SIZE 128
+#define RKMPP_RGA_MAX_SIZE 4096
 #define RKMPP_MPPFRAME_BUFINDEX 7
-#define HDR_SIZE (1024)
+#define HDR_SIZE 1024
 #define QMAX_H26x 51
 #define QMIN_H26x 10
 #define QMAX_VPx 127
@@ -51,6 +53,9 @@ typedef struct {
     int level;
     int coder;
     int dct8x8;
+    enum AVPixelFormat postrga_format;
+    int postrga_width;
+    int postrga_height;
 } RKMPPCodecContext;
 
 typedef struct {
@@ -113,7 +118,11 @@ uint64_t rkmpp_update_latency(AVCodecContext *avctx, int latency);
     { "quality_min", "Minimum Quality", OFFSET(qmin), AV_OPT_TYPE_INT, \
         { .i64=50 }, 1, 100, VE, "qmin"}, \
     { "quality_max", "Maximum Quality", OFFSET(qmax), AV_OPT_TYPE_INT, \
-            { .i64=100 }, 1, 100, VE, "qmax"}, 
+            { .i64=100 }, 1, 100, VE, "qmax"}, \
+    { "width", "scale to Width", OFFSET(postrga_width), AV_OPT_TYPE_INT, \
+             { .i64=0 }, 0, RKMPP_RGA_MAX_SIZE, VE, "width"}, \
+    { "height", "scale to Height", OFFSET(postrga_height), AV_OPT_TYPE_INT, \
+             { .i64=0 }, 0, RKMPP_RGA_MAX_SIZE, VE, "height"},
 
 static const AVOption options_h264_encoder[] = {
     ENCODEROPTS()
@@ -201,6 +210,35 @@ static const FFCodecDefault rkmpp_enc_defaults[] = {
     { NULL }
 };
 
+static const enum AVPixelFormat rkmppvepu1formats[] = {
+        AV_PIX_FMT_NV16,
+        AV_PIX_FMT_YUV422P,
+        AV_PIX_FMT_YUYV422,
+        AV_PIX_FMT_UYVY422,
+        AV_PIX_FMT_BGRA,
+        AV_PIX_FMT_BGR0,
+        AV_PIX_FMT_NV12,
+        AV_PIX_FMT_YUV420P,
+        AV_PIX_FMT_DRM_PRIME,
+        AV_PIX_FMT_NONE,
+};
+
+static const enum AVPixelFormat rkmppvepu5formats[] = {
+        AV_PIX_FMT_NV24,
+        AV_PIX_FMT_YUV444P,
+        AV_PIX_FMT_NV16,
+        AV_PIX_FMT_YUV422P,
+        AV_PIX_FMT_BGR24,
+        AV_PIX_FMT_YUYV422,
+        AV_PIX_FMT_UYVY422,
+        AV_PIX_FMT_BGRA,
+        AV_PIX_FMT_BGR0,
+        AV_PIX_FMT_NV12,
+        AV_PIX_FMT_YUV420P,
+        AV_PIX_FMT_DRM_PRIME,
+        AV_PIX_FMT_NONE,
+};
+
 #define RKMPP_CODEC(NAME, ID, BSFS, TYPE) \
         static const AVClass rkmpp_##NAME##_##TYPE##_class = { \
             .class_name = "rkmpp_" #NAME "_" #TYPE, \
@@ -236,22 +274,11 @@ static const FFCodecDefault rkmpp_enc_defaults[] = {
                                                                       NULL}, \
     };
 
-#define RKMPP_ENC(NAME, ID, BSFS) \
-        RKMPP_CODEC(NAME, ID, BSFS, encoder) \
+#define RKMPP_ENC(NAME, ID, VEPU) \
+        RKMPP_CODEC(NAME, ID, NULL, encoder) \
         FF_CODEC_ENCODE_CB(rkmpp_encode), \
         .defaults       = rkmpp_enc_defaults, \
-        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_NV24, \
-                                                         AV_PIX_FMT_YUYV422, \
-                                                         AV_PIX_FMT_UYVY422, \
-                                                         AV_PIX_FMT_NV16, \
-                                                         AV_PIX_FMT_YUV422P, \
-                                                         AV_PIX_FMT_BGR24,\
-                                                         AV_PIX_FMT_BGRA, \
-                                                         AV_PIX_FMT_BGR0, \
-                                                         AV_PIX_FMT_NV12, \
-                                                         AV_PIX_FMT_YUV420P, \
-                                                         AV_PIX_FMT_DRM_PRIME, \
-                                                         AV_PIX_FMT_NONE}, \
+        .p.pix_fmts     = rkmpp##VEPU##formats, \
         .hw_configs     = (const AVCodecHWConfigInternal *const []) { HW_CONFIG_INTERNAL(NV12), \
                                                                       NULL}, \
     };
