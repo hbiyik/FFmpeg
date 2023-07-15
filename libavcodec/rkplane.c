@@ -87,42 +87,31 @@ static int set_drmdesc_to_avbuff(AVDRMFrameDescriptor *desc, AVFrame *frame){
 
     return i;
 }
+
 static int rga_scale(uint64_t rga_fd,
         uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height, uint16_t src_hstride, uint16_t src_vstride,
         uint64_t dst_fd, uint64_t dst_y, uint16_t dst_width, uint16_t dst_height, uint16_t dst_hstride, uint16_t dst_vstride,
-        enum rga_surf_format informat, enum rga_surf_format outformat){
-    struct rga_req req = {
-        .src = {
-            // fd when the source is mmapped, 0 when non mmap
-            .yrgb_addr = src_fd,
-            // y addr offset (when fd)/addr, uv = y + hstride * vstride, v = uv + (hstride * vstride) / 4
-            .uv_addr = src_y,
-            .format = informat,
-            .act_w = src_width,
-            .act_h = src_height,
-            .vir_w = src_hstride,
-            .vir_h = src_vstride,
-            .rd_mode = RGA_RASTER_MODE,
-        },
-        .dst = {
-             // fd when the destination is mmapped, 0 when non mmap
-            .yrgb_addr = dst_fd,
-            // y addr offset (when fd)/addr, uv = y + hstride * vstride, v = uv + (hstride * vstride) / 4
-            .uv_addr = dst_y,
-            .format = outformat,
-            .act_w = dst_width,
-            .act_h = dst_height,
-            .vir_w = dst_hstride,
-            .vir_h = dst_vstride,
-            .rd_mode = RGA_RASTER_MODE,
-        },
-        .mmu_info = {
-            .mmu_en = 1,
-            .mmu_flag = 0x80000521,
-        },
-    };
+        enum _Rga_SURF_FORMAT informat, enum _Rga_SURF_FORMAT outformat){
+    rga_info_t src = {0};
+    rga_info_t dst = {0};
 
-    return ioctl(rga_fd, RGA_BLIT_SYNC, &req);
+    src.fd = src_fd;
+    src.virAddr = (void *)src_y;
+    src.mmuFlag = 1;
+    src.format = informat;
+    rga_set_rect(&src.rect, 0, 0,
+            FFALIGN(src_width, RKMPP_STRIDE_ALIGN), FFALIGN(src_height, RKMPP_STRIDE_ALIGN),
+            src_hstride, src_vstride, informat);
+
+    dst.fd = dst_fd;
+    dst.virAddr = (void *)dst_y;
+    dst.mmuFlag = 1;
+    dst.format = outformat;
+    rga_set_rect(&dst.rect, 0, 0,
+            FFALIGN(dst_width, RKMPP_STRIDE_ALIGN), FFALIGN(dst_height, RKMPP_STRIDE_ALIGN),
+            dst_hstride, dst_vstride, outformat);
+
+    return c_RkRgaBlit(&src, &dst, NULL);
 }
 
 int rga_convert_mpp_mpp(AVCodecContext *avctx, MppFrame in_mppframe, MppFrame out_mppframe){

@@ -459,8 +459,15 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
 
             // scaling is provided without any format, better to check what format the encoder gives
             if(rk_context->postrga_format == AV_PIX_FMT_NONE){
-                rkmpp_get_mpp_format(&postformat, mpp_frame_get_fmt(mppframe));
-                rk_context->postrga_format = postformat.av;
+                if(avctx->pix_fmt == AV_PIX_FMT_BGR24 || avctx->pix_fmt == AV_PIX_FMT_BGR0 ||
+                        avctx->pix_fmt == AV_PIX_FMT_BGRA ||
+                        avctx->pix_fmt == AV_PIX_FMT_YUYV422 ||
+                        AV_PIX_FMT_UYVY422)
+                    rk_context->postrga_format = AV_PIX_FMT_NV12;
+                else {
+                    rkmpp_get_mpp_format(&postformat, mpp_frame_get_fmt(mppframe));
+                    rk_context->postrga_format = postformat.av;
+                }
             }
 
             postmppframe = create_mpp_frame(rk_context->postrga_width , rk_context->postrga_height, rk_context->postrga_format,

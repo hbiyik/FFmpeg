@@ -9,7 +9,7 @@
 #include "hwconfig.h"
 #include "decode.h"
 #include "encode.h"
-#include "rkrga.h"
+#include "rga/RgaApi.h"
 #include "libavutil/macros.h"
 #include "libavutil/log.h"
 #include "libavutil/opt.h"
@@ -87,13 +87,13 @@ typedef struct {
     enum AVPixelFormat av;
     MppFrameFormat mpp;
     uint32_t drm;
-    enum rga_surf_format rga;
+    enum _Rga_SURF_FORMAT rga;
 } rkformat;
 
 MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx);
 int rkmpp_get_drm_format(rkformat *format, uint32_t informat);
 int rkmpp_get_mpp_format(rkformat *format, MppFrameFormat informat);
-int rkmpp_get_rga_format(rkformat *format, enum rga_surf_format informat);
+int rkmpp_get_rga_format(rkformat *format, enum _Rga_SURF_FORMAT informat);
 int rkmpp_get_av_format(rkformat *format, enum AVPixelFormat informat);
 int rkmpp_init_encoder(AVCodecContext *avctx);
 int rkmpp_encode(AVCodecContext *avctx, AVPacket *packet, const AVFrame *frame, int *got_packet);

@@ -23,19 +23,19 @@
 #include "rkmpp.h"
 
 static rkformat rkformats[13] = {
-        { .av = AV_PIX_FMT_YUV420P, .mpp = MPP_FMT_YUV420P,        .drm = DRM_FORMAT_YUV420,   .rga = RGA_FORMAT_YCbCr_420_P},
-        { .av = AV_PIX_FMT_YUV422P, .mpp = MPP_FMT_YUV422P,        .drm = DRM_FORMAT_YUV422,   .rga = RGA_FORMAT_YCbCr_422_P},
-        { .av = AV_PIX_FMT_NV12,    .mpp = MPP_FMT_YUV420SP,       .drm = DRM_FORMAT_NV12,     .rga = RGA_FORMAT_YCbCr_420_SP},
-        { .av = AV_PIX_FMT_NV16,    .mpp = MPP_FMT_YUV422SP,       .drm = DRM_FORMAT_NV16,     .rga = RGA_FORMAT_YCbCr_422_SP},
-        { .av = AV_PIX_FMT_NONE,    .mpp = MPP_FMT_YUV420SP_10BIT, .drm = DRM_FORMAT_NV15,     .rga = RGA_FORMAT_YCbCr_420_SP_10B},
-        { .av = AV_PIX_FMT_BGR24,   .mpp = MPP_FMT_BGR888,         .drm = DRM_FORMAT_RGB888,   .rga = RGA_FORMAT_BGR_888},
-        { .av = AV_PIX_FMT_BGR0,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_XRGB8888, .rga = RGA_FORMAT_BGRX_8888},
-        { .av = AV_PIX_FMT_BGRA,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_ARGB8888, .rga = RGA_FORMAT_BGRA_8888},
-        { .av = AV_PIX_FMT_BGR565,  .mpp = MPP_FMT_BGR565,         .drm = DRM_FORMAT_RGB565,   .rga = RGA_FORMAT_BGR_565},
-        { .av = AV_PIX_FMT_YUYV422, .mpp = MPP_FMT_YUV422_YUYV,    .drm = DRM_FORMAT_YUYV,     .rga = RGA_FORMAT_UYVY_422},
-        { .av = AV_PIX_FMT_UYVY422, .mpp = MPP_FMT_YUV422_UYVY,    .drm = DRM_FORMAT_UYVY,     .rga = RGA_FORMAT_UNKNOWN},
-        { .av = AV_PIX_FMT_NV24,    .mpp = MPP_FMT_YUV444SP,       .drm = DRM_FORMAT_NV24,     .rga = RGA_FORMAT_UNKNOWN},
-        { .av = AV_PIX_FMT_YUV444P, .mpp = MPP_FMT_YUV444P,        .drm = DRM_FORMAT_YUV444,   .rga = RGA_FORMAT_UNKNOWN},
+        { .av = AV_PIX_FMT_YUV420P, .mpp = MPP_FMT_YUV420P,        .drm = DRM_FORMAT_YUV420,   .rga = RK_FORMAT_YCbCr_420_P},
+        { .av = AV_PIX_FMT_YUV422P, .mpp = MPP_FMT_YUV422P,        .drm = DRM_FORMAT_YUV422,   .rga = RK_FORMAT_YCbCr_422_P},
+        { .av = AV_PIX_FMT_NV12,    .mpp = MPP_FMT_YUV420SP,       .drm = DRM_FORMAT_NV12,     .rga = RK_FORMAT_YCbCr_420_SP},
+        { .av = AV_PIX_FMT_NV16,    .mpp = MPP_FMT_YUV422SP,       .drm = DRM_FORMAT_NV16,     .rga = RK_FORMAT_YCbCr_422_SP},
+        { .av = AV_PIX_FMT_NONE,    .mpp = MPP_FMT_YUV420SP_10BIT, .drm = DRM_FORMAT_NV15,     .rga = RK_FORMAT_YCbCr_420_SP_10B},
+        { .av = AV_PIX_FMT_BGR24,   .mpp = MPP_FMT_BGR888,         .drm = DRM_FORMAT_RGB888,   .rga = RK_FORMAT_BGR_888},
+        { .av = AV_PIX_FMT_BGR0,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_XRGB8888, .rga = RK_FORMAT_BGRX_8888},
+        { .av = AV_PIX_FMT_BGRA,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_ARGB8888, .rga = RK_FORMAT_BGRA_8888},
+        { .av = AV_PIX_FMT_BGR565,  .mpp = MPP_FMT_BGR565,         .drm = DRM_FORMAT_RGB565,   .rga = RK_FORMAT_BGR_565},
+        { .av = AV_PIX_FMT_YUYV422, .mpp = MPP_FMT_YUV422_YUYV,    .drm = DRM_FORMAT_YUYV,     .rga = RK_FORMAT_YUYV_422},
+        { .av = AV_PIX_FMT_UYVY422, .mpp = MPP_FMT_YUV422_UYVY,    .drm = DRM_FORMAT_UYVY,     .rga = RK_FORMAT_UYVY_422},
+        { .av = AV_PIX_FMT_NV24,    .mpp = MPP_FMT_YUV444SP,       .drm = DRM_FORMAT_NV24,     .rga = RK_FORMAT_UNKNOWN},
+        { .av = AV_PIX_FMT_YUV444P, .mpp = MPP_FMT_YUV444P,        .drm = DRM_FORMAT_YUV444,   .rga = RK_FORMAT_UNKNOWN},
 };
 
 #define GETFORMAT(NAME, TYPE)\
@@ -54,7 +54,7 @@ int rkmpp_get_##NAME##_format(rkformat *format, TYPE informat){ \
 
 GETFORMAT(drm, uint32_t)
 GETFORMAT(mpp, MppFrameFormat)
-GETFORMAT(rga, enum rga_surf_format)
+GETFORMAT(rga, enum _Rga_SURF_FORMAT)
 GETFORMAT(av, enum AVPixelFormat)
 
 MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx)
