@@ -116,9 +116,9 @@ uint64_t rkmpp_update_latency(AVCodecContext *avctx, int latency);
         {"CQP", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_FIXQP }, 0, 0, VE, "rc_mode" }, \
         {"AVBR", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_AVBR }, 0, 0, VE, "rc_mode" }, \
     { "quality_min", "Minimum Quality", OFFSET(qmin), AV_OPT_TYPE_INT, \
-        { .i64=50 }, 1, 100, VE, "qmin"}, \
+        { .i64=50 }, 0, 100, VE, "qmin"}, \
     { "quality_max", "Maximum Quality", OFFSET(qmax), AV_OPT_TYPE_INT, \
-            { .i64=100 }, 1, 100, VE, "qmax"}, \
+            { .i64=100 }, 0, 100, VE, "qmax"}, \
     { "width", "scale to Width", OFFSET(postrga_width), AV_OPT_TYPE_INT, \
              { .i64=0 }, 0, RKMPP_RGA_MAX_SIZE, VE, "width"}, \
     { "height", "scale to Height", OFFSET(postrga_height), AV_OPT_TYPE_INT, \
