@@ -205,8 +205,13 @@ static int rkmpp_send_packet(AVCodecContext *avctx, AVPacket *packet)
             int64_t y = avctx->pkt_timebase.num * (int64_t)avctx->framerate.num;
             codec->ptsstep = x / y;
         }
-        pts = codec->pts;
-        codec->pts += codec->ptsstep;
+        if(packet->dts == AV_NOPTS_VALUE || packet->dts < 0){
+            pts = codec->pts;
+            codec->pts += codec->ptsstep;
+        } else {
+            codec->pts = packet->dts;
+            pts = packet->dts;
+        }
     }
 
     ret = mpp_packet_init(&mpkt, packet->data, packet->size);
