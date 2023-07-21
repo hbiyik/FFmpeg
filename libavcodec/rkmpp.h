@@ -187,6 +187,7 @@ static const AVOption options_hevc_encoder[] = {
 
 static const AVOption options_vp8_encoder[] = {
     ENCODEROPTS()
+    { NULL }
 };
 
 #define DECODEROPTIONS(NAME, TYPE) \
