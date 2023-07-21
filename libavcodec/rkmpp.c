@@ -40,7 +40,7 @@ static rkformat rkformats[13] = {
 
 #define GETFORMAT(NAME, TYPE)\
 int rkmpp_get_##NAME##_format(rkformat *format, TYPE informat){ \
-    for(int i=0; i < 12; i++){ \
+    for(int i=0; i < 13; i++){ \
         if(rkformats[i].NAME == informat){ \
             format->av = rkformats[i].av;\
             format->mpp = rkformats[i].mpp;\
