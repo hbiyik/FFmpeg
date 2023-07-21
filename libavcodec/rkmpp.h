@@ -257,7 +257,6 @@ static const enum AVPixelFormat rkmppvepu5formats[] = {
             .close          = rkmpp_close_codec, \
             .flush          = rkmpp_flush, \
             .p.priv_class   = &rkmpp_##NAME##_##TYPE##_class, \
-            .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING | AV_CODEC_CAP_HARDWARE, \
             .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE | FF_CODEC_CAP_CONTIGUOUS_BUFFERS, \
             .bsfs           = BSFS, \
             .p.wrapper_name = "rkmpp",
@@ -266,6 +265,7 @@ static const enum AVPixelFormat rkmppvepu5formats[] = {
 #define RKMPP_DEC(NAME, ID, BSFS) \
         RKMPP_CODEC(NAME, ID, BSFS, decoder) \
         FF_CODEC_RECEIVE_FRAME_CB(rkmpp_receive_frame), \
+        .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING | AV_CODEC_CAP_HARDWARE, \
         .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
                                                          AV_PIX_FMT_NV12, \
                                                          AV_PIX_FMT_YUV420P, \
@@ -278,6 +278,7 @@ static const enum AVPixelFormat rkmppvepu5formats[] = {
 #define RKMPP_ENC(NAME, ID, VEPU) \
         RKMPP_CODEC(NAME, ID, NULL, encoder) \
         FF_CODEC_ENCODE_CB(rkmpp_encode), \
+        .p.capabilities = AV_CODEC_CAP_HARDWARE, \
         .defaults       = rkmpp_enc_defaults, \
         .p.pix_fmts     = rkmpp##VEPU##formats, \
         .hw_configs     = (const AVCodecHWConfigInternal *const []) { HW_CONFIG_INTERNAL(NV12), \
