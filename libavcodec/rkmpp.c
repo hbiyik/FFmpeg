@@ -245,7 +245,7 @@ void rkmpp_flush(AVCodecContext *avctx)
     av_log(avctx, AV_LOG_DEBUG, "Flush.\n");
 
     codec->mpi->reset(codec->ctx);
-    codec->norga = codec->last_frame_time = codec->frames = codec->recfg = 0;
+    codec->norga = codec->last_frame_time = codec->frames = codec->hascfg = 0;
 
     av_packet_unref(&codec->lastpacket);
     av_frame_unref(&codec->lastframe);

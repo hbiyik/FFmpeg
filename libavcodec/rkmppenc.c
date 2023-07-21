@@ -26,7 +26,7 @@ static int rkmpp_config_withframe(AVCodecContext *avctx, MppFrame mppframe, AVFr
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppEncCfg cfg = codec->enccfg;
 
-    if(codec->recfg == 0){
+    if(codec->hascfg == 0){
         rkformat format;
 
         int ret;
@@ -48,7 +48,7 @@ static int rkmpp_config_withframe(AVCodecContext *avctx, MppFrame mppframe, AVFr
             av_log(avctx, AV_LOG_ERROR, "Failed to config with frame (code = %d).\n", ret);
             return AVERROR_UNKNOWN;
         }
-        codec->recfg = 1;
+        codec->hascfg = 1;
         rkmpp_get_mpp_format(&format, mpp_frame_get_fmt(mppframe));
         av_log(avctx, AV_LOG_INFO, "Reconfigured with w=%d, h=%d, format=%s.\n", mpp_frame_get_width(mppframe),
                 mpp_frame_get_height(mppframe), av_get_pix_fmt_name(format.av));

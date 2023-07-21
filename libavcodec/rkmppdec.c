@@ -105,9 +105,12 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
      mpp_format = mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK;
 
     if (mpp_frame_get_info_change(mppframe)) {
-        av_log(avctx, AV_LOG_INFO, "Decoder noticed an info change\n");
+        if(!codec->hascfg)
+            av_log(avctx, AV_LOG_INFO, "Decoder noticed an info change\n");
+        else
+            ret = AVERROR(EAGAIN);
 
-        if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+        if (!codec->hascfg && avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
             char drmname[4];
             AVHWFramesContext *hwframes;
             rkmpp_get_mpp_format(&format, mpp_format);
@@ -125,6 +128,7 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
         codec->mpi->control(codec->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
         if(mpp_format == MPP_FMT_YUV420SP_10BIT)
             av_log(avctx, AV_LOG_WARNING, "10bit NV15 plane will be downgraded to 8bit %s.\n", av_get_pix_fmt_name(avctx->pix_fmt));
+        codec->hascfg = 1;
         goto clean;
     }
 
