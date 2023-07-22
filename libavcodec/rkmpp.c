@@ -100,11 +100,6 @@ void rkmpp_release_codec(void *opaque, uint8_t *data)
         codec->buffer_group = NULL;
     }
 
-    if (codec->rga_fd) {
-        close(codec->rga_fd);
-        codec->rga_fd = 0;
-    }
-
     if(codec->hwframes_ref)
         av_buffer_unref(&codec->hwframes_ref);
     if(codec->hwdevice_ref)
@@ -205,15 +200,7 @@ int rkmpp_init_codec(AVCodecContext *avctx)
     env = getenv("FFMPEG_RKMPP_NORGA");
     if(env != NULL){
         codec->norga = 1;
-        codec->rga_fd = -1;
         av_log(avctx, AV_LOG_INFO, "Bypassing RGA and using libyuv soft conversion\n");
-    }
-
-    if (!codec->norga){
-        codec->rga_fd = open("/dev/rga", O_RDWR);
-        if (codec->rga_fd < 0) {
-           av_log(avctx, AV_LOG_WARNING, "Failed to open RGA, Falling back to libyuv\n");
-        }
     }
 
     ret = mpp_buffer_group_get_internal(&codec->buffer_group, MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_DMA32);

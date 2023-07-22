@@ -88,8 +88,7 @@ static int set_drmdesc_to_avbuff(AVDRMFrameDescriptor *desc, AVFrame *frame){
     return i;
 }
 
-static int rga_scale(uint64_t rga_fd,
-        uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height, uint16_t src_hstride, uint16_t src_vstride,
+static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height, uint16_t src_hstride, uint16_t src_vstride,
         uint64_t dst_fd, uint64_t dst_y, uint16_t dst_width, uint16_t dst_height, uint16_t dst_hstride, uint16_t dst_vstride,
         enum _Rga_SURF_FORMAT informat, enum _Rga_SURF_FORMAT outformat){
     rga_info_t src = {0};
@@ -119,13 +118,12 @@ int rga_convert_mpp_mpp(AVCodecContext *avctx, MppFrame in_mppframe, MppFrame ou
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     rkformat informat, outformat;
 
-    if (!codec->norga && codec->rga_fd >= 0){
+    if (!codec->norga){
         if(!out_mppframe)
             return -1;
         rkmpp_get_mpp_format(&informat, mpp_frame_get_fmt(in_mppframe) & MPP_FRAME_FMT_MASK);
         rkmpp_get_mpp_format(&outformat, mpp_frame_get_fmt(out_mppframe) & MPP_FRAME_FMT_MASK);
-        if(rga_scale(codec->rga_fd,
-            mpp_buffer_get_fd(mpp_frame_get_buffer(in_mppframe)), 0,
+        if(rga_scale(mpp_buffer_get_fd(mpp_frame_get_buffer(in_mppframe)), 0,
             mpp_frame_get_width(in_mppframe), mpp_frame_get_height(in_mppframe),
             mpp_frame_get_hor_stride(in_mppframe),  mpp_frame_get_ver_stride(in_mppframe),
             mpp_buffer_get_fd(mpp_frame_get_buffer(out_mppframe)), 0,
@@ -153,9 +151,8 @@ static int rga_convert_mpp_av(AVCodecContext *avctx, MppFrame mppframe, AVFrame 
     rkmpp_get_av_format(&inrkformat, informat);
     rkmpp_get_av_format(&outrkformat, outformat);
 
-    if (!codec->norga && codec->rga_fd >= 0){
-        if(rga_scale(codec->rga_fd,
-                mpp_buffer_get_fd(buffer), 0,
+    if (!codec->norga){
+        if(rga_scale(mpp_buffer_get_fd(buffer), 0,
                 mpp_frame_get_width(mppframe), mpp_frame_get_height(mppframe),
                 mpp_frame_get_hor_stride(mppframe),  mpp_frame_get_ver_stride(mppframe),
                 0, (uint64_t) frame->data[0],

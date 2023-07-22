@@ -78,7 +78,6 @@ typedef struct {
     uint64_t frames;
     uint64_t latencies[RKMPP_FPS_FRAME_MACD];
 
-    int rga_fd;
     int8_t norga;
     int (*init_callback)(struct AVCodecContext *avctx);
 } RKMPPCodec;
