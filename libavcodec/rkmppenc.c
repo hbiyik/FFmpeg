@@ -376,8 +376,10 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
         goto fail;
     }
 
-    if(rkmpp_config(avctx))
+    if(rkmpp_config(avctx)){
+        ret = AVERROR_UNKNOWN;
         goto fail;
+    }
 
     // copy sps/pps/vps to extradata for h26x
     if(coding_type == MPP_VIDEO_CodingAVC || coding_type == MPP_VIDEO_CodingHEVC){
