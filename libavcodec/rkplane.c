@@ -335,11 +335,13 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
     if(desc){
         MppBufferInfo info;
         AVDRMLayerDescriptor *layer = &desc->layers[0];
+        rkmpp_get_drm_format(&format, layer->format);
 
-        size = FFMIN(desc->objects[0].size, size);
-        //size = desc->objects[0].size;
-        //hstride =layer->planes[0].pitch;
-        //vstride = height;
+        if(format.mpp == MPP_FMT_YUV420SP_10BIT){
+            size = desc->objects[0].size;
+            hstride =layer->planes[0].pitch;
+        } else
+            size = FFMIN(desc->objects[0].size, size);
 
         memset(&info, 0, sizeof(info));
         info.type   = MPP_BUFFER_TYPE_DRM;
