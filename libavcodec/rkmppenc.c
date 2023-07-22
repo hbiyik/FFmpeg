@@ -477,15 +477,13 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
 
         rkmpp_get_mpp_format(&format, mpp_frame_get_fmt(mppframe));
 
-        if(avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
-            if(check_vp8_planes(avctx, format.av)){
-                ret = AVERROR_UNKNOWN;
-                goto clean;
-            }
-            if(check_scaling(avctx, format.av)){
-                ret = AVERROR_UNKNOWN;
-                goto clean;
-            }
+        if(check_vp8_planes(avctx, format.av)){
+            ret = AVERROR_UNKNOWN;
+            goto clean;
+        }
+        if(check_scaling(avctx, format.av)){
+            ret = AVERROR_UNKNOWN;
+            goto clean;
         }
 
         if(rk_context->postrga_format != AV_PIX_FMT_NONE || rk_context->postrga_width || rk_context->postrga_height){
