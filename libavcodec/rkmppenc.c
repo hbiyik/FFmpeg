@@ -297,6 +297,59 @@ static int rkmpp_config(AVCodecContext *avctx){
     return 0;
 }
 
+//https://github.com/rockchip-linux/mpp/issues/417
+//Encoder does not support 422 planes, but we can do this with rga
+//FIX-ME: NV12/YUV422P do not have libyuv fallbacks when encoding vp8
+static int check_vp8_planes(AVCodecContext *avctx, enum AVPixelFormat pix_fmt){
+    MppCodingType coding_type = rkmpp_get_codingtype(avctx);
+    RKMPPCodecContext *rk_context = avctx->priv_data;
+
+    if(coding_type == MPP_VIDEO_CodingVP8 &&
+            (pix_fmt == AV_PIX_FMT_NV16 ||
+             pix_fmt == AV_PIX_FMT_YUV422P)){
+        rk_context->postrga_format = AV_PIX_FMT_NV12;
+
+        if (avctx->width < RKMPP_RGA_MIN_SIZE || avctx->width > RKMPP_RGA_MAX_SIZE){
+            av_log(avctx, AV_LOG_ERROR, "Frame width (%d) not in rga scalable range (%d - %d)\n",
+                    avctx->width, RKMPP_RGA_MIN_SIZE, RKMPP_RGA_MAX_SIZE);
+            return -1;
+        } else
+            rk_context->postrga_width = avctx->width;
+
+        if (avctx->height < RKMPP_RGA_MIN_SIZE || avctx->height > RKMPP_RGA_MAX_SIZE){
+            av_log(avctx, AV_LOG_ERROR, "Frame height (%d) not in rga scalable range (%d - %d)\n",
+                    avctx->height, RKMPP_RGA_MIN_SIZE, RKMPP_RGA_MAX_SIZE);
+            return -1;
+        } else
+            rk_context->postrga_height = avctx->height;
+    } else
+        rk_context->postrga_format = AV_PIX_FMT_NONE;
+    return 0;
+}
+
+static int check_scaling(AVCodecContext *avctx, enum AVPixelFormat pix_fmt){
+    RKMPPCodecContext *rk_context = avctx->priv_data;
+
+    if(rk_context->postrga_width || rk_context->postrga_height){
+        if(pix_fmt != AV_PIX_FMT_NV16 && pix_fmt != AV_PIX_FMT_NV12 &&
+                pix_fmt != AV_PIX_FMT_YUV422P && pix_fmt != AV_PIX_FMT_YUV420P){
+            av_log(avctx, AV_LOG_ERROR, "Scaling is only supported for NV12,NV16,YUV420P,YUV422P. %s requested\n",
+                    av_get_pix_fmt_name(pix_fmt));
+            return -1;
+        }
+        // align it to accepted RGA range
+        rk_context->postrga_width = FFMAX(rk_context->postrga_width, RKMPP_RGA_MIN_SIZE);
+        rk_context->postrga_height = FFMAX(rk_context->postrga_height, RKMPP_RGA_MIN_SIZE);
+        rk_context->postrga_width = FFMIN(rk_context->postrga_width, RKMPP_RGA_MAX_SIZE);
+        rk_context->postrga_height = FFMIN(rk_context->postrga_height, RKMPP_RGA_MAX_SIZE);
+        avctx->width = rk_context->postrga_width;
+        avctx->height = rk_context->postrga_height;
+        if(rk_context->postrga_format == AV_PIX_FMT_NONE)
+            rk_context->postrga_format = pix_fmt;
+    }
+    return 0;
+}
+
 int rkmpp_init_encoder(AVCodecContext *avctx){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
@@ -364,48 +417,16 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
         mpp_packet_deinit(&packet);
     }
 
-    //https://github.com/rockchip-linux/mpp/issues/417
-    //Encoder does not support 422 planes, but we can do this with rga
-    //FIX-ME: NV12/YUV422P do not have libyuv fallbacks when encoding vp8
-    if(coding_type == MPP_VIDEO_CodingVP8 &&
-            (avctx->pix_fmt == AV_PIX_FMT_NV16 ||
-             avctx->pix_fmt == AV_PIX_FMT_YUV422P)){
-        rk_context->postrga_format = AV_PIX_FMT_NV12;
 
-        if (avctx->width < RKMPP_RGA_MIN_SIZE || avctx->width > RKMPP_RGA_MAX_SIZE){
-            ret = AVERROR_UNKNOWN;
-            av_log(avctx, AV_LOG_ERROR, "Frame width (%d) not in rga scalable range (%d - %d)\n",
-                    avctx->width, RKMPP_RGA_MIN_SIZE, RKMPP_RGA_MAX_SIZE);
-            return -1;
-        } else
-            rk_context->postrga_width = avctx->width;
-
-        if (avctx->height < RKMPP_RGA_MIN_SIZE || avctx->height > RKMPP_RGA_MAX_SIZE){
-            ret = AVERROR_UNKNOWN;
-            av_log(avctx, AV_LOG_ERROR, "Frame height (%d) not in rga scalable range (%d - %d)\n",
-                    avctx->height, RKMPP_RGA_MIN_SIZE, RKMPP_RGA_MAX_SIZE);
-            return -1;
-        } else
-            rk_context->postrga_height = avctx->height;
-    } else
-        rk_context->postrga_format = AV_PIX_FMT_NONE;
-
-    // scaling is requested
-    if(rk_context->postrga_width || rk_context->postrga_height){
-        if(avctx->pix_fmt != AV_PIX_FMT_NV16 && avctx->pix_fmt != AV_PIX_FMT_NV12 &&
-                avctx->pix_fmt != AV_PIX_FMT_YUV422P && avctx->pix_fmt != AV_PIX_FMT_YUV420P){
-            av_log(avctx, AV_LOG_ERROR, "Scaling is only supported for NV12,NV16,YUV420P,YUV422P. %s requested\n",
-                    av_get_pix_fmt_name(avctx->pix_fmt));
+    if(avctx->pix_fmt != AV_PIX_FMT_DRM_PRIME){
+        if(check_vp8_planes(avctx, avctx->pix_fmt)){
             ret = AVERROR_UNKNOWN;
             goto fail;
         }
-        // align it to accepted RGA range
-        rk_context->postrga_width = FFMAX(rk_context->postrga_width, RKMPP_RGA_MIN_SIZE);
-        rk_context->postrga_height = FFMAX(rk_context->postrga_height, RKMPP_RGA_MIN_SIZE);
-        rk_context->postrga_width = FFMIN(rk_context->postrga_width, RKMPP_RGA_MAX_SIZE);
-        rk_context->postrga_height = FFMIN(rk_context->postrga_height, RKMPP_RGA_MAX_SIZE);
-        avctx->width = rk_context->postrga_width;
-        avctx->height = rk_context->postrga_height;
+        if(check_scaling(avctx, avctx->pix_fmt)){
+            ret = AVERROR_UNKNOWN;
+            goto fail;
+        }
     }
 
     codec->mpi->control(codec->ctx, MPP_SET_INPUT_TIMEOUT, &input_timeout);
@@ -427,6 +448,7 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame mppframe = NULL;
+    rkformat format;
     int ret=0, keepframe=0;
 
     // EOS frame, avframe=NULL
@@ -453,22 +475,21 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
                 mppframe = create_mpp_frame(frame->width, frame->height, avctx->pix_fmt, codec->buffer_group, NULL, frame);
         }
 
-        if(rk_context->postrga_format != AV_PIX_FMT_NONE || rk_context->postrga_width || rk_context->postrga_height){
-            rkformat postformat;
-            MppFrame postmppframe = NULL;
+        rkmpp_get_mpp_format(&format, mpp_frame_get_fmt(mppframe));
 
-            // scaling is provided without any format, better to check what format the encoder gives
-            if(rk_context->postrga_format == AV_PIX_FMT_NONE){
-                if(avctx->pix_fmt == AV_PIX_FMT_BGR24 || avctx->pix_fmt == AV_PIX_FMT_BGR0 ||
-                        avctx->pix_fmt == AV_PIX_FMT_BGRA ||
-                        avctx->pix_fmt == AV_PIX_FMT_YUYV422 ||
-                        AV_PIX_FMT_UYVY422)
-                    rk_context->postrga_format = AV_PIX_FMT_NV12;
-                else {
-                    rkmpp_get_mpp_format(&postformat, mpp_frame_get_fmt(mppframe));
-                    rk_context->postrga_format = postformat.av;
-                }
+        if(avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+            if(check_vp8_planes(avctx, format.av)){
+                ret = AVERROR_UNKNOWN;
+                goto clean;
             }
+            if(check_scaling(avctx, format.av)){
+                ret = AVERROR_UNKNOWN;
+                goto clean;
+            }
+        }
+
+        if(rk_context->postrga_format != AV_PIX_FMT_NONE || rk_context->postrga_width || rk_context->postrga_height){
+            MppFrame postmppframe = NULL;
 
             postmppframe = create_mpp_frame(rk_context->postrga_width , rk_context->postrga_height, rk_context->postrga_format,
                     codec->buffer_group, NULL, NULL);
