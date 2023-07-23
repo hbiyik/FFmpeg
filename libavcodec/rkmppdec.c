@@ -69,7 +69,13 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     MppFrame mppframe = NULL;
     MppBuffer buffer = NULL;
     rkformat format;
-    int ret, mode, latency;
+    int ret, latency;
+    int mpp_width, mpp_height, mpp_mode;
+    enum AVColorRange mpp_color_range;
+    enum AVColorPrimaries mpp_color_primaries;
+    enum AVColorTransferCharacteristic mpp_color_trc;
+    enum AVColorSpace mpp_color_space;
+    int64_t mpp_pts;
 
     codec->mpi->control(codec->ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&timeout);
 
@@ -144,6 +150,14 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     }
 
     latency = rkmpp_update_latency(avctx, -1);
+    mpp_pts = mpp_frame_get_pts(mppframe);
+    mpp_width = mpp_frame_get_width(mppframe);
+    mpp_height = mpp_frame_get_height(mppframe);
+    mpp_color_range = mpp_frame_get_color_range(mppframe);
+    mpp_color_primaries = mpp_frame_get_color_primaries(mppframe);
+    mpp_color_trc = mpp_frame_get_color_trc(mppframe);
+    mpp_color_space = mpp_frame_get_colorspace(mppframe);
+    mpp_mode = mpp_frame_get_mode(mppframe);
 
     if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
         ret = import_mpp_to_drm(avctx, mppframe, frame);
@@ -163,27 +177,24 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
         return ret;
     }
 
-
-
     // setup general frame fields
-    frame->format           = avctx->pix_fmt;
-    frame->width            = mpp_frame_get_width(mppframe);
-    frame->height           = mpp_frame_get_height(mppframe);
-    frame->color_range      = mpp_frame_get_color_range(mppframe);
-    frame->color_primaries  = mpp_frame_get_color_primaries(mppframe);
-    frame->color_trc        = mpp_frame_get_color_trc(mppframe);
-    frame->colorspace       = mpp_frame_get_colorspace(mppframe);
-    frame->pts              = mpp_frame_get_pts(mppframe);
+    frame->format = avctx->pix_fmt;
+    frame->width = mpp_width;
+    frame->height = mpp_height;
+    frame->color_range = mpp_color_range;
+    frame->color_primaries = mpp_color_primaries;
+    frame->color_trc = mpp_color_trc;
+    frame->colorspace = mpp_color_space;
+    frame->pts = mpp_pts;
 
     // when mpp can not determine the color space, it returns reserved (0) value
     // firefox does not understand this and instead expect unspecified (2) values
-    frame->color_primaries  = frame->color_primaries == AVCOL_PRI_RESERVED0 ? AVCOL_PRI_UNSPECIFIED : frame->color_primaries;
-    frame->color_trc        = frame->color_trc == AVCOL_TRC_RESERVED0 ? AVCOL_TRC_UNSPECIFIED : frame->color_trc;
-    frame->colorspace        = frame->colorspace == AVCOL_SPC_RGB ? AVCOL_SPC_UNSPECIFIED: frame->color_trc;
+    frame->color_primaries = frame->color_primaries == AVCOL_PRI_RESERVED0 ? AVCOL_PRI_UNSPECIFIED : frame->color_primaries;
+    frame->color_trc = frame->color_trc == AVCOL_TRC_RESERVED0 ? AVCOL_TRC_UNSPECIFIED : frame->color_trc;
+    frame->colorspace = frame->colorspace == AVCOL_SPC_RGB ? AVCOL_SPC_UNSPECIFIED: frame->color_trc;
 
-    mode = mpp_frame_get_mode(mppframe);
-    frame->interlaced_frame = ((mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_DEINTERLACED);
-    frame->top_field_first  = ((mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_TOP_FIRST);
+    frame->interlaced_frame = ((mpp_mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_DEINTERLACED);
+    frame->top_field_first  = ((mpp_mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_TOP_FIRST);
 
     codec->frames++;
     rkmpp_update_latency(avctx, latency);
