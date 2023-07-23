@@ -254,6 +254,7 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
     rkformat format;
     int size, ret, hstride, vstride, planes;
     int planesizes[3];
+    int hstride_mult = 1;
 
     ret = mpp_frame_init(&mppframe);
 
@@ -311,14 +312,16 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         break;
     case AV_PIX_FMT_YUYV422:
     case AV_PIX_FMT_UYVY422:
-        hstride = FFALIGN(width * 2, RKMPP_STRIDE_ALIGN);
+        hstride_mult = 2;
+        hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
         size = hstride * vstride;
         planesizes[0] = size; // whole plane
         planes = 1;
         break;
     case AV_PIX_FMT_RGB24:
     case AV_PIX_FMT_BGR24:
-        hstride = FFALIGN(width * 3, RKMPP_STRIDE_ALIGN);
+        hstride_mult = 3;
+        hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
         size = hstride * vstride;
         planesizes[0] = size; // whole plane
         planes = 1;
@@ -331,7 +334,8 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
     case AV_PIX_FMT_ABGR:
     case AV_PIX_FMT_BGRA:
     case AV_PIX_FMT_RGBA:
-        hstride = FFALIGN(width * 4, RKMPP_STRIDE_ALIGN);
+        hstride_mult = 4;
+        hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
         size = hstride * vstride;
         planesizes[0] = size; // whole plane
         planes = 1;
@@ -344,11 +348,8 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         AVDRMLayerDescriptor *layer = &desc->layers[0];
         rkmpp_get_drm_format(&format, layer->format);
 
-        if(format.mpp == MPP_FMT_YUV420SP_10BIT){
-            size = desc->objects[0].size;
-            hstride =layer->planes[0].pitch;
-        } else
-            size = FFMIN(desc->objects[0].size, size);
+        size = desc->objects[0].size;
+        hstride = FFALIGN(layer->planes[0].pitch * hstride_mult, RKMPP_STRIDE_ALIGN);
 
         memset(&info, 0, sizeof(info));
         info.type   = MPP_BUFFER_TYPE_DRM;
