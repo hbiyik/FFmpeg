@@ -204,12 +204,12 @@ static int rkmpp_send_packet(AVCodecContext *avctx, AVPacket *packet)
     int ret;
 
     if(pts == AV_NOPTS_VALUE || pts < 0){
-        if(!codec->ptsstep){
+        if(!codec->ptsstep && avctx->framerate.den && avctx->framerate.num){
             int64_t x = avctx->pkt_timebase.den * (int64_t)avctx->framerate.den;
             int64_t y = avctx->pkt_timebase.num * (int64_t)avctx->framerate.num;
             codec->ptsstep = x / y;
         }
-        if(packet->dts == AV_NOPTS_VALUE || packet->dts < 0){
+        if(codec->ptsstep && (packet->dts == AV_NOPTS_VALUE || packet->dts < 0)){
             pts = codec->pts;
             codec->pts += codec->ptsstep;
         } else {
