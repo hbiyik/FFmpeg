@@ -52,9 +52,9 @@ static int rkmpp_config_withframe(AVCodecContext *avctx, MppFrame mppframe, AVFr
         rkmpp_get_mpp_format(&format, mpp_frame_get_fmt(mppframe));
         av_log(avctx, AV_LOG_INFO, "Reconfigured with w=%d, h=%d, format=%s.\n", mpp_frame_get_width(mppframe),
                 mpp_frame_get_height(mppframe), av_get_pix_fmt_name(format.av));
-        return ret;
+        return 0;
     }
-    return -1;
+    return 0;
 }
 
 static int rkmpp_config(AVCodecContext *avctx){
@@ -518,7 +518,11 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
         mpp_frame_set_pts(mppframe, frame->pts);
     }
 
-    rkmpp_config_withframe(avctx, mppframe, frame);
+    ret = rkmpp_config_withframe(avctx, mppframe, frame);
+    if(ret){
+        ret = AVERROR_UNKNOWN;
+        goto clean;
+    }
 
     // put the frame in encoder
     ret = codec->mpi->encode_put_frame(codec->ctx, mppframe);
