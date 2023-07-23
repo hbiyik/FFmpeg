@@ -252,9 +252,10 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
     MppFrame mppframe = NULL;
     MppBuffer mppbuffer = NULL;
     rkformat format;
-    int size, ret, hstride, vstride, planes;
+    int size, ret, hstride, vstride;
     int planesizes[3];
     int hstride_mult = 1;
+    int planes = 2;
 
     ret = mpp_frame_init(&mppframe);
 
@@ -349,7 +350,11 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         rkmpp_get_drm_format(&format, layer->format);
 
         size = desc->objects[0].size;
-        hstride = FFALIGN(layer->planes[0].pitch * hstride_mult, RKMPP_STRIDE_ALIGN);
+        hstride = layer->planes[0].pitch * hstride_mult;
+        if(planes == 1)
+            vstride = size / hstride;
+        else
+            vstride = layer->planes[1].offset / hstride;
 
         memset(&info, 0, sizeof(info));
         info.type   = MPP_BUFFER_TYPE_DRM;
