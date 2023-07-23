@@ -94,21 +94,28 @@ static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16
     rga_info_t src = {0};
     rga_info_t dst = {0};
 
+    if(dst_hstride < dst_width)
+        dst_width = FFALIGN(dst_width, RKMPP_STRIDE_ALIGN);
+    if(dst_vstride < dst_height)
+        dst_height = FFALIGN(dst_height, RKMPP_STRIDE_ALIGN);
+    if(src_hstride < src_width)
+        src_width = FFALIGN(src_width, RKMPP_STRIDE_ALIGN);
+    if(src_vstride < src_height)
+        src_height = FFALIGN(src_height, RKMPP_STRIDE_ALIGN);
+
     src.fd = src_fd;
     src.virAddr = (void *)src_y;
     src.mmuFlag = 1;
     src.format = informat;
     rga_set_rect(&src.rect, 0, 0,
-            FFALIGN(src_width, RKMPP_STRIDE_ALIGN), FFALIGN(src_height, RKMPP_STRIDE_ALIGN),
-            src_hstride, src_vstride, informat);
+            src_width, src_height, src_hstride, src_vstride, informat);
 
     dst.fd = dst_fd;
     dst.virAddr = (void *)dst_y;
     dst.mmuFlag = 1;
     dst.format = outformat;
     rga_set_rect(&dst.rect, 0, 0,
-            FFALIGN(dst_width, RKMPP_STRIDE_ALIGN), FFALIGN(dst_height, RKMPP_STRIDE_ALIGN),
-            dst_hstride, dst_vstride, outformat);
+            dst_width, dst_height, dst_hstride, dst_vstride, outformat);
 
     return c_RkRgaBlit(&src, &dst, NULL);
 }
