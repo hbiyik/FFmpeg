@@ -28,6 +28,19 @@
 #include "libavutil/thread.h"
 #include "avcodec.h"
 #include "version.h"
+extern AVCodec ff_av1_rkmpp_decoder;
+extern AVCodec ff_h263_rkmpp_decoder;
+extern AVCodec ff_h264_rkmpp_decoder;
+extern AVCodec ff_hevc_rkmpp_decoder;
+extern AVCodec ff_mpeg1_rkmpp_decoder;
+extern AVCodec ff_mpeg2_rkmpp_decoder;
+extern AVCodec ff_mpeg4_rkmpp_decoder;
+extern AVCodec ff_vp8_rkmpp_decoder;
+extern AVCodec ff_vp9_rkmpp_decoder;
+
+extern AVCodec ff_vp8_rkmpp_encoder;
+extern AVCodec ff_h264_rkmpp_encoder;
+extern AVCodec ff_hevc_rkmpp_encoder;
 
 extern AVCodec ff_a64multi_encoder;
 extern AVCodec ff_a64multi5_encoder;
@@ -147,12 +160,10 @@ extern AVCodec ff_h264_v4l2m2m_decoder;
 extern AVCodec ff_h264_mediacodec_decoder;
 extern AVCodec ff_h264_mmal_decoder;
 extern AVCodec ff_h264_qsv_decoder;
-extern AVCodec ff_h264_rkmpp_decoder;
 extern AVCodec ff_hap_encoder;
 extern AVCodec ff_hap_decoder;
 extern AVCodec ff_hevc_decoder;
 extern AVCodec ff_hevc_qsv_decoder;
-extern AVCodec ff_hevc_rkmpp_decoder;
 extern AVCodec ff_hevc_v4l2m2m_decoder;
 extern AVCodec ff_hnm4_video_decoder;
 extern AVCodec ff_hq_hqa_decoder;
@@ -357,10 +368,8 @@ extern AVCodec ff_vp6a_decoder;
 extern AVCodec ff_vp6f_decoder;
 extern AVCodec ff_vp7_decoder;
 extern AVCodec ff_vp8_decoder;
-extern AVCodec ff_vp8_rkmpp_decoder;
 extern AVCodec ff_vp8_v4l2m2m_decoder;
 extern AVCodec ff_vp9_decoder;
-extern AVCodec ff_vp9_rkmpp_decoder;
 extern AVCodec ff_vp9_v4l2m2m_decoder;
 extern AVCodec ff_vqa_decoder;
 extern AVCodec ff_webp_decoder;
