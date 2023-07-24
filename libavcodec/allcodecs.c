@@ -34,6 +34,20 @@
 #include "codec_id.h"
 #include "codec_internal.h"
 
+extern const FFCodec ff_av1_rkmpp_decoder;
+extern const FFCodec ff_h263_rkmpp_decoder;
+extern const FFCodec ff_h264_rkmpp_decoder;
+extern const FFCodec ff_hevc_rkmpp_decoder;
+extern const FFCodec ff_mpeg1_rkmpp_decoder;
+extern const FFCodec ff_mpeg2_rkmpp_decoder;
+extern const FFCodec ff_mpeg4_rkmpp_decoder;
+extern const FFCodec ff_vp8_rkmpp_decoder;
+extern const FFCodec ff_vp9_rkmpp_decoder;
+
+extern const FFCodec ff_vp8_rkmpp_encoder;
+extern const FFCodec ff_h264_rkmpp_encoder;
+extern const FFCodec ff_hevc_rkmpp_encoder;
+
 extern const FFCodec ff_a64multi_encoder;
 extern const FFCodec ff_a64multi5_encoder;
 extern const FFCodec ff_aasc_decoder;
@@ -154,12 +168,10 @@ extern const FFCodec ff_h264_v4l2m2m_decoder;
 extern const FFCodec ff_h264_mediacodec_decoder;
 extern const FFCodec ff_h264_mmal_decoder;
 extern const FFCodec ff_h264_qsv_decoder;
-extern const FFCodec ff_h264_rkmpp_decoder;
 extern const FFCodec ff_hap_encoder;
 extern const FFCodec ff_hap_decoder;
 extern const FFCodec ff_hevc_decoder;
 extern const FFCodec ff_hevc_qsv_decoder;
-extern const FFCodec ff_hevc_rkmpp_decoder;
 extern const FFCodec ff_hevc_v4l2m2m_decoder;
 extern const FFCodec ff_hnm4_video_decoder;
 extern const FFCodec ff_hq_hqa_decoder;
@@ -372,10 +384,8 @@ extern const FFCodec ff_vp6a_decoder;
 extern const FFCodec ff_vp6f_decoder;
 extern const FFCodec ff_vp7_decoder;
 extern const FFCodec ff_vp8_decoder;
-extern const FFCodec ff_vp8_rkmpp_decoder;
 extern const FFCodec ff_vp8_v4l2m2m_decoder;
 extern const FFCodec ff_vp9_decoder;
-extern const FFCodec ff_vp9_rkmpp_decoder;
 extern const FFCodec ff_vp9_v4l2m2m_decoder;
 extern const FFCodec ff_vqa_decoder;
 extern const FFCodec ff_webp_decoder;
