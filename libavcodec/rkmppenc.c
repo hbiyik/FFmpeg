@@ -376,6 +376,17 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
         goto fail;
     }
 
+    if(avctx->pix_fmt != AV_PIX_FMT_DRM_PRIME){
+        if(check_vp8_planes(avctx, avctx->pix_fmt)){
+            ret = AVERROR_UNKNOWN;
+            goto fail;
+        }
+        if(check_scaling(avctx, avctx->pix_fmt)){
+            ret = AVERROR_UNKNOWN;
+            goto fail;
+        }
+    }
+
     if(rkmpp_config(avctx)){
         ret = AVERROR_UNKNOWN;
         goto fail;
@@ -417,18 +428,6 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
         memcpy(avctx->extradata, packetpos, packetlen);
         memset(avctx->extradata + packetlen, 0, AV_INPUT_BUFFER_PADDING_SIZE);
         mpp_packet_deinit(&packet);
-    }
-
-
-    if(avctx->pix_fmt != AV_PIX_FMT_DRM_PRIME){
-        if(check_vp8_planes(avctx, avctx->pix_fmt)){
-            ret = AVERROR_UNKNOWN;
-            goto fail;
-        }
-        if(check_scaling(avctx, avctx->pix_fmt)){
-            ret = AVERROR_UNKNOWN;
-            goto fail;
-        }
     }
 
     codec->mpi->control(codec->ctx, MPP_SET_INPUT_TIMEOUT, &input_timeout);
