@@ -256,7 +256,7 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
     int planesizes[3];
     int hstride_mult = 1;
     int planes = 2;
-    int isrgb = 0;
+    int haspitch = 0;
 
     ret = mpp_frame_init(&mppframe);
 
@@ -314,6 +314,7 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         break;
     case AV_PIX_FMT_YUYV422:
     case AV_PIX_FMT_UYVY422:
+        haspitch = 1;
         hstride_mult = 2;
         hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
         size = hstride * vstride;
@@ -322,7 +323,7 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         break;
     case AV_PIX_FMT_RGB24:
     case AV_PIX_FMT_BGR24:
-        isrgb = 1;
+        haspitch = 1;
         hstride_mult = 3;
         hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
         size = hstride * vstride;
@@ -337,7 +338,7 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
     case AV_PIX_FMT_ABGR:
     case AV_PIX_FMT_BGRA:
     case AV_PIX_FMT_RGBA:
-        isrgb = 1;
+        haspitch = 1;
         hstride_mult = 4;
         hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
         size = hstride * vstride;
@@ -353,7 +354,7 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         rkmpp_get_drm_format(&format, layer->format);
 
         size = desc->objects[0].size;
-        if(isrgb)
+        if(haspitch)
             hstride = layer->planes[0].pitch;
         else
             hstride = layer->planes[0].pitch * hstride_mult;
