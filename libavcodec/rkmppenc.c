@@ -476,6 +476,11 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
                 mppframe = create_mpp_frame(frame->width, frame->height, avctx->pix_fmt, codec->buffer_group, NULL, frame);
         }
 
+        if(!mppframe){
+            ret = AVERROR_UNKNOWN;
+            goto clean;
+        }
+
         rkmpp_get_mpp_format(&format, mpp_frame_get_fmt(mppframe));
 
         if(check_vp8_planes(avctx, format.av)){

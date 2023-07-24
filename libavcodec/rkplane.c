@@ -523,8 +523,13 @@ MppFrame import_drm_to_mpp(AVCodecContext *avctx, AVFrame *frame){
     AVDRMFrameDescriptor *desc = (AVDRMFrameDescriptor*) frame->data[0];
     AVDRMLayerDescriptor *layer = &desc->layers[0];
     rkformat format;
+    char drmname[4];
+    DRMFORMATNAME(drmname, layer->format)
 
-    rkmpp_get_drm_format(&format, layer->format);
+    if(rkmpp_get_drm_format(&format, layer->format)){
+        av_log(avctx, AV_LOG_ERROR, "Unsupported DRM Format %s\n", drmname);
+        return NULL;
+    }
 
     if(format.drm == DRM_FORMAT_NV15){
         // encoder does not support 10bit frames, we down scale them to 8bit
