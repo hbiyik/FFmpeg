@@ -25,11 +25,6 @@
 /**
  * @file
  * API-specific header for AV_HWDEVICE_TYPE_DRM.
- *
- * Internal frame allocation is not currently supported - all frames
- * must be allocated by the user.  Thus AVHWFramesContext is always
- * NULL, though this may change if support for frame allocation is
- * added in future.
  */
 
 enum {
@@ -141,13 +136,33 @@ typedef struct AVDRMFrameDescriptor {
     AVDRMObjectDescriptor objects[AV_DRM_MAX_PLANES];
     /**
      * Number of layers in the frame.
+     *
+     * Set by users if need more than 1.
      */
     int nb_layers;
     /**
      * Array of layers in the frame.
+     * NOTE: total planes of layers must not be more than AV_NUM_DATA_POINTERS.
      */
     AVDRMLayerDescriptor layers[AV_DRM_MAX_PLANES];
 } AVDRMFrameDescriptor;
+
+/**
+ * DRM Compatible frame descriptor.
+ *
+ */
+typedef struct AVDRMCompatibleFrameDescriptor {
+    /**
+     * Backwards compatibility with AVDRMFrameDescriptor.
+     */
+    AVDRMFrameDescriptor drm_desc;
+
+    /**
+     * References to MppBuffer instances which are used
+     * on each drm frame index.
+     */
+    void* opaque;
+} AVDRMCompatibleFrameDescriptor;
 
 /**
  * DRM device.
