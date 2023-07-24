@@ -161,10 +161,6 @@ static const AVOption options_h264_encoder[] = {
 
 static const AVOption options_hevc_encoder[] = {
     ENCODEROPTS()
-    { "profile", "Set profile restrictions", OFFSET(profile), AV_OPT_TYPE_INT,
-            { .i64=FF_PROFILE_HEVC_MAIN }, -1, FF_PROFILE_HEVC_MAIN_10, VE, "profile"},
-        { "main",   NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_HEVC_MAIN},  INT_MIN, INT_MAX, VE, "profile" },
-        { "main10", NULL, 0, AV_OPT_TYPE_CONST, {.i64 = FF_PROFILE_HEVC_MAIN_10},      INT_MIN, INT_MAX, VE, "profile" },
     { "level", "Compression Level", OFFSET(level), AV_OPT_TYPE_INT,
             { .i64 = 0 }, FF_LEVEL_UNKNOWN, 0xff, VE, "level"},
         { "1",          NULL, 0, AV_OPT_TYPE_CONST, { .i64 = 30 }, 0, 0, VE, "level"},

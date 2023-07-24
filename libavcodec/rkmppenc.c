@@ -238,7 +238,7 @@ static int rkmpp_config(AVCodecContext *avctx){
              break;
          }
          case MPP_VIDEO_CodingHEVC : {
-             avctx->profile = rk_context->profile;
+             avctx->profile = FF_PROFILE_HEVC_MAIN;
              avctx->level = rk_context->level;
              mpp_enc_cfg_set_s32(cfg, "h265:profile", avctx->profile);
              mpp_enc_cfg_set_s32(cfg, "h265:level", avctx->level);
