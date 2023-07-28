@@ -27,7 +27,7 @@ static rkformat rkformats[13] = {
         { .av = AV_PIX_FMT_YUV422P, .mpp = MPP_FMT_YUV422P,        .drm = DRM_FORMAT_YUV422,   .rga = RK_FORMAT_YCbCr_422_P},
         { .av = AV_PIX_FMT_NV12,    .mpp = MPP_FMT_YUV420SP,       .drm = DRM_FORMAT_NV12,     .rga = RK_FORMAT_YCbCr_420_SP},
         { .av = AV_PIX_FMT_NV16,    .mpp = MPP_FMT_YUV422SP,       .drm = DRM_FORMAT_NV16,     .rga = RK_FORMAT_YCbCr_422_SP},
-        { .av = AV_PIX_FMT_NONE,    .mpp = MPP_FMT_YUV420SP_10BIT, .drm = DRM_FORMAT_NV15,     .rga = RK_FORMAT_YCbCr_420_SP_10B},
+        { .av = AV_PIX_FMT_NV15,    .mpp = MPP_FMT_YUV420SP_10BIT, .drm = DRM_FORMAT_NV15,     .rga = RK_FORMAT_YCbCr_420_SP_10B},
         { .av = AV_PIX_FMT_BGR24,   .mpp = MPP_FMT_BGR888,         .drm = DRM_FORMAT_BGR888,   .rga = RK_FORMAT_BGR_888},
         { .av = AV_PIX_FMT_BGR0,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_XRGB8888, .rga = RK_FORMAT_BGRX_8888},
         { .av = AV_PIX_FMT_BGRA,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_ARGB8888, .rga = RK_FORMAT_BGRA_8888},
