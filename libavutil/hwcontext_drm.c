@@ -138,6 +138,7 @@ static const struct {
     { AV_PIX_FMT_ABGR,      DRM_FORMAT_RGBA8888,    },
     { AV_PIX_FMT_RGBA,      DRM_FORMAT_ABGR8888,    },
     { AV_PIX_FMT_BGRA,      DRM_FORMAT_ARGB8888,    },
+    { AV_PIX_FMT_NV15,      DRM_FORMAT_NV15,        },
 };
 
 static void drm_device_free(AVHWDeviceContext *hwdev)
