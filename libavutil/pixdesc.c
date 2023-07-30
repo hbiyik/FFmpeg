@@ -2717,6 +2717,18 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .flags = AV_PIX_FMT_FLAG_RGB | AV_PIX_FMT_FLAG_FLOAT |
                  AV_PIX_FMT_FLAG_ALPHA,
     },
+    [AV_PIX_FMT_NV15] = {
+        .name = "nv15",
+        .nb_components = 3,
+        .log2_chroma_w = 1,
+        .log2_chroma_h = 1,
+        .comp = {
+            { 0, 1, 0, 0, 10 },        /* Y */
+            { 1, 2, 0, 0, 10 },        /* U */
+            { 1, 2, 1, 0, 10 },        /* V */
+        },
+        .flags = AV_PIX_FMT_FLAG_PLANAR,
+    },
 };
 
 static const char * const color_range_names[] = {
