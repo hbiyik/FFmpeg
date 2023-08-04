@@ -81,10 +81,6 @@
  */
 #define FF_CODEC_CAP_ICC_PROFILES           (1 << 9)
 /**
- * The decoder requires contiguous buffers.
- */
-#define FF_CODEC_CAP_CONTIGUOUS_BUFFERS     (1 << 28)
-/**
  * The encoder has AV_CODEC_CAP_DELAY set, but does not actually have delay - it
  * only wants to be flushed at the end to update some context variables (e.g.
  * 2pass stats) or produce a trailing packet. Besides that it immediately

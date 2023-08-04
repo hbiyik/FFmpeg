@@ -252,7 +252,7 @@ static const enum AVPixelFormat rkmppvepu5formats[] = {
             .close          = rkmpp_close_codec, \
             .flush          = rkmpp_flush, \
             .p.priv_class   = &rkmpp_##NAME##_##TYPE##_class, \
-            .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE | FF_CODEC_CAP_CONTIGUOUS_BUFFERS, \
+            .caps_internal  = FF_CODEC_CAP_NOT_INIT_THREADSAFE, \
             .bsfs           = BSFS, \
             .p.wrapper_name = "rkmpp",
 

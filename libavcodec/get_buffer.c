@@ -32,7 +32,6 @@
 
 #include "avcodec.h"
 #include "internal.h"
-#include "codec_internal.h"
 
 typedef struct FramePool {
     /**
@@ -148,14 +147,6 @@ FF_ENABLE_DEPRECATION_WARNINGS
 
         for (i = 0; i < 4; i++) {
             pool->linesize[i] = linesize[i];
-
-            if (ffcodec(avctx->codec)->caps_internal & FF_CODEC_CAP_CONTIGUOUS_BUFFERS) {
-                if (!i)
-                    size[0] += size[1] + size[2] + size[3];
-                else
-                    continue;
-            }
-
             if (size[i]) {
                 if (size[i] > INT_MAX - (16 + STRIDE_ALIGN - 1)) {
                     ret = AVERROR(EINVAL);
@@ -274,21 +265,6 @@ static int video_get_buffer(AVCodecContext *s, AVFrame *pic)
 
         pic->data[i] = pic->buf[i]->data;
     }
-
-    if (ffcodec(s->codec)->caps_internal & FF_CODEC_CAP_CONTIGUOUS_BUFFERS) {
-        int size;
-
-        for (i = 1; i < 4; i++) {
-            pic->linesize[i] = pool->linesize[i];
-            av_buffer_unref(&pic->buf[i]);
-        }
-
-        size = av_image_fill_pointers(pic->data, pic->format, pic->height,
-                                      pic->buf[0]->data, pic->linesize);
-        if (size < 0 || size > pic->buf[0]->size)
-            goto fail;
-    }
-
     for (; i < AV_NUM_DATA_POINTERS; i++) {
         pic->data[i] = NULL;
         pic->linesize[i] = 0;
