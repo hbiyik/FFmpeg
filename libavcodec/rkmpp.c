@@ -203,7 +203,7 @@ int rkmpp_init_codec(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_INFO, "Bypassing RGA and using libyuv soft conversion\n");
     }
 
-    ret = mpp_buffer_group_get_internal(&codec->buffer_group, MPP_BUFFER_TYPE_DRM | MPP_BUFFER_FLAGS_DMA32);
+    ret = mpp_buffer_group_get_internal(&codec->buffer_group, MPP_BUFFER_TYPE_ION | MPP_BUFFER_FLAGS_DMA32);
     if (ret) {
        av_log(avctx, AV_LOG_ERROR, "Failed to get buffer group (code = %d)\n", ret);
        ret = AVERROR_UNKNOWN;
