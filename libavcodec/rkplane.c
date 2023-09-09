@@ -95,38 +95,6 @@ static int set_drmdesc_to_avbuff(AVDRMFrameDescriptor *desc, AVFrame *frame){
     return i;
 }
 
-static int get_plane_count(enum AVPixelFormat avformat){
-    int planes = 0;
-    switch(avformat){
-    case AV_PIX_FMT_NV12:
-    case AV_PIX_FMT_NV15:
-    case AV_PIX_FMT_NV16:
-    case AV_PIX_FMT_NV24:
-        planes = 2;
-        break;
-    case AV_PIX_FMT_YUV420P:
-    case AV_PIX_FMT_YUV422P:
-    case AV_PIX_FMT_YUV444P:
-        planes = 3;
-        break;
-    case AV_PIX_FMT_YUYV422:
-    case AV_PIX_FMT_UYVY422:
-    case AV_PIX_FMT_RGB24:
-    case AV_PIX_FMT_BGR24:
-    case AV_PIX_FMT_0RGB:
-    case AV_PIX_FMT_0BGR:
-    case AV_PIX_FMT_BGR0:
-    case AV_PIX_FMT_RGB0:
-    case AV_PIX_FMT_ARGB:
-    case AV_PIX_FMT_ABGR:
-    case AV_PIX_FMT_BGRA:
-    case AV_PIX_FMT_RGBA:
-        planes = 1;
-        break;
-    }
-    return planes;
-}
-
 static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height,
         uint64_t dst_fd, uint64_t dst_y, uint16_t dst_width, uint16_t dst_height,
         MppFrameFormat informat, MppFrameFormat outformat){
@@ -138,7 +106,7 @@ static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16
     rkmpp_get_mpp_format(&_informat, informat & MPP_FRAME_FMT_MASK);
     rkmpp_get_mpp_format(&_outformat, outformat & MPP_FRAME_FMT_MASK);
 
-    if(get_plane_count(_informat.av) == 1){
+    if(_informat.numplanes == 1){
         src_wpixstride = src_width;
         src_hpixstride = src_height;
     } else {
@@ -146,7 +114,7 @@ static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16
         src_hpixstride = FFALIGN(src_height, RKMPP_STRIDE_ALIGN);
     }
 
-    if(get_plane_count(_outformat.av) == 1){
+    if(_outformat.numplanes == 1){
         dst_wpixstride = dst_width;
         dst_hpixstride = dst_height;
     } else {
@@ -292,175 +260,24 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
     rkformat format;
     int avmap[3][4]; //offset, dststride, width, height of max 3 planes
     int size, ret, hstride, vstride;
-    int hstride_mult = 1;
-    int planes = get_plane_count(avformat);
-    int haspitch = 0;
     int overshoot = 1024;
 
-    ret = mpp_frame_init(&mppframe);
-
-    if (ret) {
-        goto clean;
-     }
-
-    vstride = FFALIGN(height, RKMPP_STRIDE_ALIGN);
-
-    switch(avformat){
-    case AV_PIX_FMT_NV12:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        // y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        // uv plane
-        avmap[1][0] = hstride * vstride; // uv offset = y plane size
-        avmap[1][1] = hstride; // uv stride = hstride
-        avmap[1][2] = width; // uv width = width
-        avmap[1][3] = (height + 1)>> 1; // uv height = height / 2
-        size = avmap[1][0] + ((avmap[1][0] + 1) >> 1) + overshoot; // total size = y+uv planesize
-        break;
-    case AV_PIX_FMT_YUV420P:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        // y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        // u plane
-        avmap[1][0] = hstride * vstride; // u offset = y plane size
-        avmap[1][1] = (hstride + 1)>> 1; // u stride = hstride / 2
-        avmap[1][2] = (width + 1)>> 1; // u width = width / 2
-        avmap[1][3] = (height + 1)>> 1; // u height = height / 2
-        // v plane
-        avmap[2][0] = avmap[1][0] + ((avmap[1][0] + 1) >> 2); // v offset = y+u plane size
-        avmap[2][1] = avmap[1][1]; // v stride = hstride / 2
-        avmap[2][2] = avmap[1][2]; // v width = width / 2
-        avmap[2][3] = avmap[1][3]; // v height = height / 2
-        size = avmap[2][0] + ((avmap[1][0] + 1) >> 2) + overshoot; // total size = y+u+v planesize
-        break;
-    case AV_PIX_FMT_NV16:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        // y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        // uv plane
-        avmap[1][0] = hstride * vstride; // uv offset = y plane size
-        avmap[1][1] = hstride; // uv stride = hstride
-        avmap[1][2] = width; // uv width = width
-        avmap[1][3] = height; // uv height = height
-        size = avmap[1][0] * 2 + overshoot; // total size = y+uv planesize
-        break;
-    case AV_PIX_FMT_YUV422P:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        //y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        //u plane
-        avmap[1][0] = hstride * vstride; // u offset = y plane size
-        avmap[1][1] = (hstride + 1)>> 1; // u stride = hstride / 2
-        avmap[1][2] = width; // u width = width
-        avmap[1][3] = height; // u height = height
-        //v plane
-        avmap[2][0] = avmap[1][0] + ((avmap[1][0] + 1) >> 1); // v offset = y+u plane size
-        avmap[2][1] = avmap[1][1]; // v stride = hstride
-        avmap[2][2] = avmap[1][2]; // v width = width
-        avmap[2][3] = avmap[1][3]; // v height = height / 2
-        size = avmap[1][0] * 2 + overshoot; // total size = y+u+v planesize
-        break;
-    case AV_PIX_FMT_NV24:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        // y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        // uv plane
-        avmap[1][0] = hstride * vstride; // uv offset = y plane size
-        avmap[1][1] = hstride << 1; // uv stride = hstride * 2
-        avmap[1][2] = width << 1; // uv width = width * 2
-        avmap[1][3] = height; // uv height = height
-        size = avmap[1][0] * 3 + overshoot; // total size = y+u+v planesize
-        break;
-    case AV_PIX_FMT_YUV444P:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        //y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        //u plane
-        avmap[1][0] = hstride * vstride; // u offset = y plane size
-        avmap[1][1] = hstride; // u stride = hstride
-        avmap[1][2] = width; // u width = width
-        avmap[1][3] = height; // u height = height
-        //v plane
-        avmap[2][0] = avmap[1][0] * 2; // v offset = y+u plane size
-        avmap[2][1] = avmap[1][1]; // v stride = hstride
-        avmap[2][2] = avmap[1][2]; // v width = width
-        avmap[2][3] = avmap[1][3]; // v height = height
-        size = avmap[1][0] * 3 + overshoot; // total size = y+u+v planesize
-        break;
-    case AV_PIX_FMT_YUYV422:
-    case AV_PIX_FMT_UYVY422:
-        haspitch = 1;
-        hstride_mult = 2;
-        hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width << 1,
-        avmap[0][3] = height;
-        size = hstride * vstride;
-        break;
-    case AV_PIX_FMT_RGB24:
-    case AV_PIX_FMT_BGR24:
-        haspitch = 1;
-        hstride_mult = 3;
-        hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width * 3,
-        avmap[0][3] = height;
-        size = hstride * vstride;
-        break;
-    case AV_PIX_FMT_0RGB:
-    case AV_PIX_FMT_0BGR:
-    case AV_PIX_FMT_BGR0:
-    case AV_PIX_FMT_RGB0:
-    case AV_PIX_FMT_ARGB:
-    case AV_PIX_FMT_ABGR:
-    case AV_PIX_FMT_BGRA:
-    case AV_PIX_FMT_RGBA:
-        haspitch = 1;
-        hstride_mult = 4;
-        hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width << 2,
-        avmap[0][3] = height;
-        size = hstride * vstride;
-        break;
-    }
-
+    // create mpp buffer for drm and av/mppframes
+    // and calculate strides and plane size
+    // calculate each plane size (avmap) for avframes
     if(desc){
         MppBufferInfo info;
         AVDRMLayerDescriptor *layer = &desc->layers[0];
         rkmpp_get_drm_format(&format, layer->format);
 
         size = desc->objects[0].size;
-        if(haspitch)
+        if(format.numplanes == 1){
             hstride = layer->planes[0].pitch;
-        else
-            hstride = layer->planes[0].pitch * hstride_mult;
-
-        if(planes == 1)
             vstride = size / hstride;
-        else
+        } else {
+            hstride = layer->planes[0].pitch * format.multiplier;
             vstride = layer->planes[1].offset / hstride;
+        }
 
         memset(&info, 0, sizeof(info));
         info.type   = MPP_BUFFER_TYPE_DRM;
@@ -468,14 +285,154 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         info.fd     = desc->objects[0].fd;
 
         ret = mpp_buffer_import(&mppbuffer, &info);
-        rkmpp_get_drm_format(&format, layer->format);
     } else {
-        ret = mpp_buffer_get(buffer_group, &mppbuffer, size);
         rkmpp_get_av_format(&format, avformat);
+
+        vstride = FFALIGN(height, RKMPP_STRIDE_ALIGN);
+
+        switch(avformat){
+        case AV_PIX_FMT_NV12:
+            hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
+            // y plane
+            avmap[0][0] = 0;
+            avmap[0][1] = hstride;
+            avmap[0][2] = width,
+            avmap[0][3] = height;
+            // uv plane
+            avmap[1][0] = hstride * vstride; // uv offset = y plane size
+            avmap[1][1] = hstride; // uv stride = hstride
+            avmap[1][2] = width; // uv width = width
+            avmap[1][3] = (height + 1)>> 1; // uv height = height / 2
+            size = avmap[1][0] + ((avmap[1][0] + 1) >> 1) + overshoot; // total size = y+uv planesize
+            break;
+        case AV_PIX_FMT_YUV420P:
+            hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
+            // y plane
+            avmap[0][0] = 0;
+            avmap[0][1] = hstride;
+            avmap[0][2] = width,
+            avmap[0][3] = height;
+            // u plane
+            avmap[1][0] = hstride * vstride; // u offset = y plane size
+            avmap[1][1] = (hstride + 1)>> 1; // u stride = hstride / 2
+            avmap[1][2] = (width + 1)>> 1; // u width = width / 2
+            avmap[1][3] = (height + 1)>> 1; // u height = height / 2
+            // v plane
+            avmap[2][0] = avmap[1][0] + ((avmap[1][0] + 1) >> 2); // v offset = y+u plane size
+            avmap[2][1] = avmap[1][1]; // v stride = hstride / 2
+            avmap[2][2] = avmap[1][2]; // v width = width / 2
+            avmap[2][3] = avmap[1][3]; // v height = height / 2
+            size = avmap[2][0] + ((avmap[1][0] + 1) >> 2) + overshoot; // total size = y+u+v planesize
+            break;
+        case AV_PIX_FMT_NV16:
+            hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
+            // y plane
+            avmap[0][0] = 0;
+            avmap[0][1] = hstride;
+            avmap[0][2] = width,
+            avmap[0][3] = height;
+            // uv plane
+            avmap[1][0] = hstride * vstride; // uv offset = y plane size
+            avmap[1][1] = hstride; // uv stride = hstride
+            avmap[1][2] = width; // uv width = width
+            avmap[1][3] = height; // uv height = height
+            size = avmap[1][0] * 2 + overshoot; // total size = y+uv planesize
+            break;
+        case AV_PIX_FMT_YUV422P:
+            hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
+            //y plane
+            avmap[0][0] = 0;
+            avmap[0][1] = hstride;
+            avmap[0][2] = width,
+            avmap[0][3] = height;
+            //u plane
+            avmap[1][0] = hstride * vstride; // u offset = y plane size
+            avmap[1][1] = (hstride + 1)>> 1; // u stride = hstride / 2
+            avmap[1][2] = width; // u width = width
+            avmap[1][3] = height; // u height = height
+            //v plane
+            avmap[2][0] = avmap[1][0] + ((avmap[1][0] + 1) >> 1); // v offset = y+u plane size
+            avmap[2][1] = avmap[1][1]; // v stride = hstride
+            avmap[2][2] = avmap[1][2]; // v width = width
+            avmap[2][3] = avmap[1][3]; // v height = height / 2
+            size = avmap[1][0] * 2 + overshoot; // total size = y+u+v planesize
+            break;
+        case AV_PIX_FMT_NV24:
+            hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
+            // y plane
+            avmap[0][0] = 0;
+            avmap[0][1] = hstride;
+            avmap[0][2] = width,
+            avmap[0][3] = height;
+            // uv plane
+            avmap[1][0] = hstride * vstride; // uv offset = y plane size
+            avmap[1][1] = hstride << 1; // uv stride = hstride * 2
+            avmap[1][2] = width << 1; // uv width = width * 2
+            avmap[1][3] = height; // uv height = height
+            size = avmap[1][0] * 3 + overshoot; // total size = y+u+v planesize
+            break;
+        case AV_PIX_FMT_YUV444P:
+            hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
+            //y plane
+            avmap[0][0] = 0;
+            avmap[0][1] = hstride;
+            avmap[0][2] = width,
+            avmap[0][3] = height;
+            //u plane
+            avmap[1][0] = hstride * vstride; // u offset = y plane size
+            avmap[1][1] = hstride; // u stride = hstride
+            avmap[1][2] = width; // u width = width
+            avmap[1][3] = height; // u height = height
+            //v plane
+            avmap[2][0] = avmap[1][0] * 2; // v offset = y+u plane size
+            avmap[2][1] = avmap[1][1]; // v stride = hstride
+            avmap[2][2] = avmap[1][2]; // v width = width
+            avmap[2][3] = avmap[1][3]; // v height = height
+            size = avmap[1][0] * 3 + overshoot; // total size = y+u+v planesize
+            break;
+        case AV_PIX_FMT_YUYV422:
+        case AV_PIX_FMT_UYVY422:
+            hstride = FFALIGN(width * format.multiplier, RKMPP_STRIDE_ALIGN);
+            avmap[0][0] = 0;
+            avmap[0][1] = hstride;
+            avmap[0][2] = width << 1,
+            avmap[0][3] = height;
+            size = hstride * vstride;
+            break;
+        case AV_PIX_FMT_RGB24:
+        case AV_PIX_FMT_BGR24:
+            hstride = FFALIGN(width * format.multiplier, RKMPP_STRIDE_ALIGN);
+            avmap[0][0] = 0;
+            avmap[0][1] = hstride;
+            avmap[0][2] = width * 3,
+            avmap[0][3] = height;
+            size = hstride * vstride;
+            break;
+        case AV_PIX_FMT_0RGB:
+        case AV_PIX_FMT_0BGR:
+        case AV_PIX_FMT_BGR0:
+        case AV_PIX_FMT_RGB0:
+        case AV_PIX_FMT_ARGB:
+        case AV_PIX_FMT_ABGR:
+        case AV_PIX_FMT_BGRA:
+        case AV_PIX_FMT_RGBA:
+            hstride = FFALIGN(width * format.multiplier, RKMPP_STRIDE_ALIGN);
+            avmap[0][0] = 0;
+            avmap[0][1] = hstride;
+            avmap[0][2] = width << 2,
+            avmap[0][3] = height;
+            size = hstride * vstride;
+            break;
+        }
+
+        ret = mpp_buffer_get(buffer_group, &mppbuffer, size);
+        if (ret)
+            goto clean;
     }
 
-     if (ret)
-         goto clean;
+    ret = mpp_frame_init(&mppframe);
+    if (ret)
+        goto clean;
 
      mpp_frame_set_width(mppframe, width);
      mpp_frame_set_height(mppframe, height);
@@ -486,8 +443,9 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
      mpp_frame_set_buf_size(mppframe, size);
      mpp_buffer_put(mppbuffer);
 
+     // copy av frame to mpp buffer
      if(frame){
-         for(int i = 0; i < planes; i++){
+         for(int i = 0; i < format.numplanes; i++){
              CopyPlane(frame->data[i], frame->linesize[i],
                      (char *)mpp_buffer_get_ptr(mppbuffer) + avmap[i][0], avmap[i][1], avmap[i][2], avmap[i][3]);
          }

@@ -87,6 +87,8 @@ typedef struct {
     MppFrameFormat mpp;
     uint32_t drm;
     enum _Rga_SURF_FORMAT rga;
+    int numplanes;
+    int multiplier;
 } rkformat;
 
 MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx);
