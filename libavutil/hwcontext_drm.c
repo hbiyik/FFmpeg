@@ -343,7 +343,9 @@ static AVBufferRef *drm_pool_alloc(void *opaque, size_t size)
 
     for (i = 1; i < layer->nb_planes; i++) {
         layer->planes[i].object_index = 0;
-        layer->planes[i].offset = layer->planes[i-1].pitch * hwfc->height;
+        layer->planes[i].offset =
+            layer->planes[i-1].offset +
+            layer->planes[i-1].pitch * AV_CEIL_RSHIFT(hwfc->height, i > 1 ? pixdesc->log2_chroma_h : 0);
         layer->planes[i].pitch =
             av_image_get_linesize(hwfc->sw_format, hwfc->width, i);
     }
