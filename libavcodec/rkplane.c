@@ -106,14 +106,14 @@ static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16
     src.mmuFlag = 1;
     src.format = informat;
     rga_set_rect(&src.rect, 0, 0,
-            src_width, src_height, src_width, src_height, informat);
+            src_width, src_height, FFALIGN(src_width, RKMPP_STRIDE_ALIGN), FFALIGN(src_height, RKMPP_STRIDE_ALIGN), informat);
 
     dst.fd = dst_fd;
     dst.virAddr = (void *)dst_y;
     dst.mmuFlag = 1;
     dst.format = outformat;
     rga_set_rect(&dst.rect, 0, 0,
-            dst_width, dst_height, dst_width, dst_height, outformat);
+            dst_width, dst_height, FFALIGN(dst_width, RKMPP_STRIDE_ALIGN), FFALIGN(dst_height, RKMPP_STRIDE_ALIGN), outformat);
 
     return c_RkRgaBlit(&src, &dst, NULL);
 }
