@@ -114,15 +114,33 @@ static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16
     src.virAddr = (void *)src_y;
     src.mmuFlag = 1;
     src.format = informat;
-    rga_set_rect(&src.rect, 0, 0,
-            src_width, src_height, src_hstride, src_vstride, informat);
+#if 1
+    if (informat == RK_FORMAT_RGBA_8888 ||
+        informat == RK_FORMAT_RGBX_8888 ||
+        informat == RK_FORMAT_BGRA_8888 ||
+        informat == RK_FORMAT_BGRX_8888)
+        rga_set_rect(&src.rect, 0, 0,
+                src_width, src_height, src_width, src_height, informat);
+    else
+#endif
+        rga_set_rect(&src.rect, 0, 0,
+                src_width, src_height, src_hstride, src_vstride, informat);
 
     dst.fd = dst_fd;
     dst.virAddr = (void *)dst_y;
     dst.mmuFlag = 1;
     dst.format = outformat;
-    rga_set_rect(&dst.rect, 0, 0,
-            dst_width, dst_height, dst_hstride, dst_vstride, outformat);
+#if 1
+    if (outformat == RK_FORMAT_RGBA_8888 ||
+        outformat == RK_FORMAT_RGBX_8888 ||
+        outformat == RK_FORMAT_BGRA_8888 ||
+        outformat == RK_FORMAT_BGRX_8888)
+        rga_set_rect(&dst.rect, 0, 0,
+                dst_width, dst_height, dst_width, dst_height, outformat);
+    else
+#endif
+        rga_set_rect(&dst.rect, 0, 0,
+                dst_width, dst_height, dst_hstride, dst_vstride, outformat);
 
     return c_RkRgaBlit(&src, &dst, NULL);
 }

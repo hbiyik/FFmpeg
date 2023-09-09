@@ -331,12 +331,14 @@ static int check_scaling(AVCodecContext *avctx, enum AVPixelFormat pix_fmt){
     RKMPPCodecContext *rk_context = avctx->priv_data;
 
     if(rk_context->postrga_width || rk_context->postrga_height){
+#if 0
         if(pix_fmt != AV_PIX_FMT_NV16 && pix_fmt != AV_PIX_FMT_NV12 &&
                 pix_fmt != AV_PIX_FMT_YUV422P && pix_fmt != AV_PIX_FMT_YUV420P){
             av_log(avctx, AV_LOG_ERROR, "Scaling is only supported for NV12,NV16,YUV420P,YUV422P. %s requested\n",
                     av_get_pix_fmt_name(pix_fmt));
             return -1;
         }
+#endif
         // align it to accepted RGA range
         rk_context->postrga_width = FFMAX(rk_context->postrga_width, RKMPP_RGA_MIN_SIZE);
         rk_context->postrga_height = FFMAX(rk_context->postrga_height, RKMPP_RGA_MIN_SIZE);
@@ -381,10 +383,11 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
             ret = AVERROR_UNKNOWN;
             goto fail;
         }
-        if(check_scaling(avctx, avctx->pix_fmt)){
-            ret = AVERROR_UNKNOWN;
-            goto fail;
-        }
+    }
+
+    if(check_scaling(avctx, avctx->pix_fmt)){
+        ret = AVERROR_UNKNOWN;
+        goto fail;
     }
 
     if(rkmpp_config(avctx)){

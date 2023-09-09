@@ -289,7 +289,7 @@ static AVBufferRef *drm_pool_alloc(void *opaque, size_t size)
         return NULL;
 
     memset(&dmcb, 0, sizeof(struct drm_mode_create_dumb));
-    dmcb.bpp = av_get_bits_per_pixel(pixdesc);
+    dmcb.bpp    = av_get_padded_bits_per_pixel(pixdesc);
     dmcb.width  = FFALIGN(hwfc->width, 16);
     dmcb.height = FFALIGN(hwfc->height, 16);
     ret = drmIoctl(hwctx->fd, DRM_IOCTL_MODE_CREATE_DUMB, &dmcb);
