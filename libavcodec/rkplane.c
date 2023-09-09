@@ -95,52 +95,25 @@ static int set_drmdesc_to_avbuff(AVDRMFrameDescriptor *desc, AVFrame *frame){
     return i;
 }
 
-static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height, uint16_t src_hstride, uint16_t src_vstride,
-        uint64_t dst_fd, uint64_t dst_y, uint16_t dst_width, uint16_t dst_height, uint16_t dst_hstride, uint16_t dst_vstride,
+static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height,
+        uint64_t dst_fd, uint64_t dst_y, uint16_t dst_width, uint16_t dst_height,
         enum _Rga_SURF_FORMAT informat, enum _Rga_SURF_FORMAT outformat){
     rga_info_t src = {0};
     rga_info_t dst = {0};
-
-    if(dst_hstride < dst_width)
-        dst_width = FFALIGN(dst_width, RKMPP_STRIDE_ALIGN);
-    if(dst_vstride < dst_height)
-        dst_height = FFALIGN(dst_height, RKMPP_STRIDE_ALIGN);
-    if(src_hstride < src_width)
-        src_width = FFALIGN(src_width, RKMPP_STRIDE_ALIGN);
-    if(src_vstride < src_height)
-        src_height = FFALIGN(src_height, RKMPP_STRIDE_ALIGN);
 
     src.fd = src_fd;
     src.virAddr = (void *)src_y;
     src.mmuFlag = 1;
     src.format = informat;
-#if 1
-    if (informat == RK_FORMAT_RGBA_8888 ||
-        informat == RK_FORMAT_RGBX_8888 ||
-        informat == RK_FORMAT_BGRA_8888 ||
-        informat == RK_FORMAT_BGRX_8888)
-        rga_set_rect(&src.rect, 0, 0,
-                src_width, src_height, src_width, src_height, informat);
-    else
-#endif
-        rga_set_rect(&src.rect, 0, 0,
-                src_width, src_height, src_hstride, src_vstride, informat);
+    rga_set_rect(&src.rect, 0, 0,
+            src_width, src_height, src_width, src_height, informat);
 
     dst.fd = dst_fd;
     dst.virAddr = (void *)dst_y;
     dst.mmuFlag = 1;
     dst.format = outformat;
-#if 1
-    if (outformat == RK_FORMAT_RGBA_8888 ||
-        outformat == RK_FORMAT_RGBX_8888 ||
-        outformat == RK_FORMAT_BGRA_8888 ||
-        outformat == RK_FORMAT_BGRX_8888)
-        rga_set_rect(&dst.rect, 0, 0,
-                dst_width, dst_height, dst_width, dst_height, outformat);
-    else
-#endif
-        rga_set_rect(&dst.rect, 0, 0,
-                dst_width, dst_height, dst_hstride, dst_vstride, outformat);
+    rga_set_rect(&dst.rect, 0, 0,
+            dst_width, dst_height, dst_width, dst_height, outformat);
 
     return c_RkRgaBlit(&src, &dst, NULL);
 }
@@ -157,10 +130,8 @@ int rga_convert_mpp_mpp(AVCodecContext *avctx, MppFrame in_mppframe, MppFrame ou
         rkmpp_get_mpp_format(&outformat, mpp_frame_get_fmt(out_mppframe) & MPP_FRAME_FMT_MASK);
         if(rga_scale(mpp_buffer_get_fd(mpp_frame_get_buffer(in_mppframe)), 0,
             mpp_frame_get_width(in_mppframe), mpp_frame_get_height(in_mppframe),
-            mpp_frame_get_hor_stride(in_mppframe),  mpp_frame_get_ver_stride(in_mppframe),
             mpp_buffer_get_fd(mpp_frame_get_buffer(out_mppframe)), 0,
             mpp_frame_get_width(out_mppframe), mpp_frame_get_height(out_mppframe),
-            mpp_frame_get_hor_stride(out_mppframe),  mpp_frame_get_ver_stride(out_mppframe),
             informat.rga,
             outformat.rga)){
                 av_log(avctx, AV_LOG_WARNING, "RGA failed falling back to soft conversion\n");
