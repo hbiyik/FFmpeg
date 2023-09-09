@@ -35,6 +35,11 @@
 #define QMIN_VPx 40
 #define QMAX_JPEG 99
 #define QMIN_JPEG 1
+#define KEEP 0
+#define SHR 0
+#define SHL 1
+#define MUL 2
+#define DIV 3
 
 
 #define DRMFORMATNAME(buf, format) \
@@ -42,21 +47,6 @@
     buf[1] = (format >> 8) & 0xff; \
     buf[2] = (format >> 16) & 0xff; \
     buf[3] = (format >> 24) & 0x7f; \
-
-typedef struct {
-    AVClass *av_class;
-    AVBufferRef *codec_ref;
-    int rc_mode;
-    int profile;
-    int qmin;
-    int qmax;
-    int level;
-    int coder;
-    int dct8x8;
-    enum AVPixelFormat postrga_format;
-    int postrga_width;
-    int postrga_height;
-} RKMPPCodecContext;
 
 typedef struct {
     MppCtx ctx;
@@ -83,11 +73,52 @@ typedef struct {
 } RKMPPCodec;
 
 typedef struct {
+    int offset;
+    int hstride;
+    int width;
+    int height;
+    int size;
+} plane;
+
+typedef struct {
+    plane plane[3];
+    int hstride;
+    int vstride;
+    int size;
+    int width;
+    int height;
+    enum AVPixelFormat avformat;
+} planedata;
+
+typedef struct {
     enum AVPixelFormat av;
     MppFrameFormat mpp;
     uint32_t drm;
     enum _Rga_SURF_FORMAT rga;
+    int numplanes;
+    planedata planedata;
+    int mode;
 } rkformat;
+
+typedef struct {
+    AVClass *av_class;
+    AVBufferRef *codec_ref;
+    int rc_mode;
+    int profile;
+    int qmin;
+    int qmax;
+    int level;
+    int coder;
+    int dct8x8;
+    int postrga_width;
+    int postrga_height;
+    rkformat rgaformat;
+    rkformat rkformat;
+    rkformat nv12format;
+    planedata avplanes;
+    planedata nv12planes;
+    planedata rgaplanes;
+} RKMPPCodecContext;
 
 MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx);
 int rkmpp_get_drm_format(rkformat *format, uint32_t informat);
@@ -103,6 +134,7 @@ int rkmpp_close_codec(AVCodecContext *avctx);
 void rkmpp_release_codec(void *opaque, uint8_t *data);
 void rkmpp_flush(AVCodecContext *avctx);
 uint64_t rkmpp_update_latency(AVCodecContext *avctx, int latency);
+int rkmpp_planedata(rkformat *format, planedata *planes, int width, int height, int align);
 
 #define OFFSET(x) offsetof(RKMPPCodecContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
@@ -239,6 +271,20 @@ static const enum AVPixelFormat rkmppvepu5formats[] = {
         AV_PIX_FMT_NONE,
 };
 
+static const enum AVPixelFormat decoderformats[] = {
+        AV_PIX_FMT_DRM_PRIME,
+        AV_PIX_FMT_NV12,
+        AV_PIX_FMT_YUV420P,
+        AV_PIX_FMT_YUYV422,
+        AV_PIX_FMT_UYVY422,
+        AV_PIX_FMT_RGBA,
+        AV_PIX_FMT_RGB0,
+        AV_PIX_FMT_BGRA,
+        AV_PIX_FMT_BGR0,
+        AV_PIX_FMT_BGR24,
+        AV_PIX_FMT_NONE
+};
+
 #define RKMPP_CODEC(NAME, ID, BSFS, TYPE) \
         static const AVClass rkmpp_##NAME##_##TYPE##_class = { \
             .class_name = "rkmpp_" #NAME "_" #TYPE, \
@@ -268,6 +314,7 @@ static const enum AVPixelFormat rkmppvepu5formats[] = {
         .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
                                                          AV_PIX_FMT_NV12, \
                                                          AV_PIX_FMT_YUV420P, \
+                                                         AV_PIX_FMT_BGR24, \
                                                          AV_PIX_FMT_NONE}, \
         .hw_configs     = (const AVCodecHWConfigInternal *const []) { HW_CONFIG_INTERNAL(DRM_PRIME), \
                                                                       HW_CONFIG_INTERNAL(NV12), \

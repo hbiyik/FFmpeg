@@ -68,7 +68,6 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     MppFrameFormat mpp_format;
     MppFrame mppframe = NULL;
     MppBuffer buffer = NULL;
-    rkformat format;
     int ret, latency;
     int mpp_width, mpp_height, mpp_mode;
     enum AVColorRange mpp_color_range;
@@ -117,12 +116,11 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
             if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
                 char drmname[4];
                 AVHWFramesContext *hwframes;
-                rkmpp_get_mpp_format(&format, mpp_format);
-                DRMFORMATNAME(drmname, format.drm)
-
+                rkmpp_get_mpp_format(&rk_context->rkformat, mpp_format);
+                DRMFORMATNAME(drmname, rk_context->rkformat.drm)
                 hwframes = (AVHWFramesContext*)codec->hwframes_ref->data;
                 hwframes->format    = AV_PIX_FMT_DRM_PRIME;
-                hwframes->sw_format = format.av;
+                hwframes->sw_format = rk_context->rkformat.av;
                 hwframes->width     = avctx->width;
                 hwframes->height    = avctx->height;
                 ret = av_hwframe_ctx_init(codec->hwframes_ref);
@@ -159,17 +157,18 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     mpp_color_space = mpp_frame_get_colorspace(mppframe);
     mpp_mode = mpp_frame_get_mode(mppframe);
 
-    if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+    if (rk_context->rkformat.av == AV_PIX_FMT_DRM_PRIME){
         ret = import_mpp_to_drm(avctx, mppframe, frame);
-    } else if (mpp_format == MPP_FMT_YUV420SP_10BIT && avctx->pix_fmt == AV_PIX_FMT_NV12){
+    } else if (mpp_format == MPP_FMT_YUV420SP_10BIT && rk_context->rkformat.av == AV_PIX_FMT_NV12){
         ret = mpp_nv15_av_nv12(avctx, mppframe, frame);
-    } else if (mpp_format == MPP_FMT_YUV420SP_10BIT && avctx->pix_fmt == AV_PIX_FMT_YUV420P){
+    } else if (mpp_format == MPP_FMT_YUV420SP_10BIT && rk_context->rkformat.av == AV_PIX_FMT_YUV420P){
         ret = mpp_nv15_av_yuv420p(avctx, mppframe, frame);
-    } else if (mpp_format == MPP_FMT_YUV420SP && avctx->pix_fmt == AV_PIX_FMT_NV12){
+    } else if (mpp_format == MPP_FMT_YUV420SP && rk_context->rkformat.av == AV_PIX_FMT_NV12){
         ret = mpp_nv12_av_nv12(avctx, mppframe, frame);
     } else {
-        rkmpp_get_mpp_format(&format, mpp_format);
-        ret = convert_mpp_to_av(avctx, mppframe, frame, format.av, avctx->pix_fmt);
+        rkformat informat;
+        rkmpp_get_mpp_format(&informat, mpp_format);
+        ret = convert_mpp_to_av(avctx, mppframe, frame, informat.av, rk_context->rkformat.av);
     }
 
     if(ret < 0){

@@ -95,38 +95,6 @@ static int set_drmdesc_to_avbuff(AVDRMFrameDescriptor *desc, AVFrame *frame){
     return i;
 }
 
-static int get_plane_count(enum AVPixelFormat avformat){
-    int planes = 0;
-    switch(avformat){
-    case AV_PIX_FMT_NV12:
-    case AV_PIX_FMT_NV15:
-    case AV_PIX_FMT_NV16:
-    case AV_PIX_FMT_NV24:
-        planes = 2;
-        break;
-    case AV_PIX_FMT_YUV420P:
-    case AV_PIX_FMT_YUV422P:
-    case AV_PIX_FMT_YUV444P:
-        planes = 3;
-        break;
-    case AV_PIX_FMT_YUYV422:
-    case AV_PIX_FMT_UYVY422:
-    case AV_PIX_FMT_RGB24:
-    case AV_PIX_FMT_BGR24:
-    case AV_PIX_FMT_0RGB:
-    case AV_PIX_FMT_0BGR:
-    case AV_PIX_FMT_BGR0:
-    case AV_PIX_FMT_RGB0:
-    case AV_PIX_FMT_ARGB:
-    case AV_PIX_FMT_ABGR:
-    case AV_PIX_FMT_BGRA:
-    case AV_PIX_FMT_RGBA:
-        planes = 1;
-        break;
-    }
-    return planes;
-}
-
 static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height,
         uint64_t dst_fd, uint64_t dst_y, uint16_t dst_width, uint16_t dst_height,
         MppFrameFormat informat, MppFrameFormat outformat){
@@ -138,7 +106,7 @@ static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16
     rkmpp_get_mpp_format(&_informat, informat & MPP_FRAME_FMT_MASK);
     rkmpp_get_mpp_format(&_outformat, outformat & MPP_FRAME_FMT_MASK);
 
-    if(get_plane_count(_informat.av) == 1){
+    if(_informat.numplanes == 1){
         src_wpixstride = src_width;
         src_hpixstride = src_height;
     } else {
@@ -146,7 +114,7 @@ static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16
         src_hpixstride = FFALIGN(src_height, RKMPP_STRIDE_ALIGN);
     }
 
-    if(get_plane_count(_outformat.av) == 1){
+    if(_outformat.numplanes == 1){
         dst_wpixstride = dst_width;
         dst_hpixstride = dst_height;
     } else {
@@ -252,246 +220,90 @@ static MppFrame wrap_mpp_to_avframe(AVCodecContext *avctx, AVFrame *frame, MppFr
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppBuffer targetbuffer = NULL;
-    int planesize;
+    char * bufferaddr;
 
     if(!targetframe)
-        targetframe = create_mpp_frame(avctx->width, avctx->height, avctx->pix_fmt, codec->buffer_group, NULL, NULL);
+        targetframe = create_mpp_frame(avctx->width, avctx->height, &rk_context->rkformat, codec->buffer_group,
+                NULL, NULL, &rk_context->avplanes);
 
     if(!targetframe)
         return NULL;
 
-    targetbuffer = mpp_frame_get_buffer(targetframe);
-    planesize = mpp_frame_get_hor_stride(targetframe) * mpp_frame_get_ver_stride(targetframe);
+    frame->width = rk_context->avplanes.width;
+    frame->height = rk_context->avplanes.height;
 
-    frame->data[0] = mpp_buffer_get_ptr(targetbuffer);
-    frame->linesize[0] = mpp_frame_get_hor_stride(targetframe);
-    frame->width = avctx->width;
-    frame->height = avctx->height;
+    targetbuffer = mpp_frame_get_buffer(targetframe);
+    bufferaddr =  mpp_buffer_get_ptr(targetbuffer);
+    for(int i=0; i < rk_context->rkformat.numplanes; i++){
+        frame->data[i] = bufferaddr + rk_context->avplanes.plane[i].offset;
+        frame->linesize[i] = rk_context->avplanes.plane[i].hstride;
+    }
     frame->extended_data = frame->data;
 
-    switch(avctx->pix_fmt){
-    case AV_PIX_FMT_YUV420P:
-        frame->data[1] = frame->data[0] + planesize;
-        frame->linesize[1] = (frame->linesize[0] + 1) >> 1;
-        frame->data[2] = frame->data[1] + ((planesize + 1) >> 2);
-        frame->linesize[2] = frame->linesize[1];
-        return targetframe;
-    case AV_PIX_FMT_NV12:
-        frame->data[1] = frame->data[0] + planesize;
-        frame->linesize[1] = frame->linesize[0];
-        return targetframe;
-    }
-
-    rkmpp_release_mppframe(targetframe, NULL);
-    return NULL;
+    return targetframe;
 }
 
-MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, MppBufferGroup buffer_group, AVDRMFrameDescriptor *desc, AVFrame *frame){
+MppFrame create_mpp_frame(int width, int height, rkformat *rkformat, MppBufferGroup buffer_group,
+        AVDRMFrameDescriptor *desc, AVFrame *frame, planedata *planedata){
     MppFrame mppframe = NULL;
     MppBuffer mppbuffer = NULL;
-    rkformat format;
-    int avmap[3][4]; //offset, dststride, width, height of max 3 planes
+    //int avmap[3][4]; //offset, dststride, width, height of max 3 planes
     int size, ret, hstride, vstride;
-    int hstride_mult = 1;
-    int planes = get_plane_count(avformat);
-    int haspitch = 0;
     int overshoot = 1024;
 
-    ret = mpp_frame_init(&mppframe);
-
-    if (ret) {
-        goto clean;
-     }
-
-    vstride = FFALIGN(height, RKMPP_STRIDE_ALIGN);
-
-    switch(avformat){
-    case AV_PIX_FMT_NV12:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        // y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        // uv plane
-        avmap[1][0] = hstride * vstride; // uv offset = y plane size
-        avmap[1][1] = hstride; // uv stride = hstride
-        avmap[1][2] = width; // uv width = width
-        avmap[1][3] = (height + 1)>> 1; // uv height = height / 2
-        size = avmap[1][0] + ((avmap[1][0] + 1) >> 1) + overshoot; // total size = y+uv planesize
-        break;
-    case AV_PIX_FMT_YUV420P:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        // y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        // u plane
-        avmap[1][0] = hstride * vstride; // u offset = y plane size
-        avmap[1][1] = (hstride + 1)>> 1; // u stride = hstride / 2
-        avmap[1][2] = (width + 1)>> 1; // u width = width / 2
-        avmap[1][3] = (height + 1)>> 1; // u height = height / 2
-        // v plane
-        avmap[2][0] = avmap[1][0] + ((avmap[1][0] + 1) >> 2); // v offset = y+u plane size
-        avmap[2][1] = avmap[1][1]; // v stride = hstride / 2
-        avmap[2][2] = avmap[1][2]; // v width = width / 2
-        avmap[2][3] = avmap[1][3]; // v height = height / 2
-        size = avmap[2][0] + ((avmap[1][0] + 1) >> 2) + overshoot; // total size = y+u+v planesize
-        break;
-    case AV_PIX_FMT_NV16:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        // y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        // uv plane
-        avmap[1][0] = hstride * vstride; // uv offset = y plane size
-        avmap[1][1] = hstride; // uv stride = hstride
-        avmap[1][2] = width; // uv width = width
-        avmap[1][3] = height; // uv height = height
-        size = avmap[1][0] * 2 + overshoot; // total size = y+uv planesize
-        break;
-    case AV_PIX_FMT_YUV422P:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        //y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        //u plane
-        avmap[1][0] = hstride * vstride; // u offset = y plane size
-        avmap[1][1] = (hstride + 1)>> 1; // u stride = hstride / 2
-        avmap[1][2] = width; // u width = width
-        avmap[1][3] = height; // u height = height
-        //v plane
-        avmap[2][0] = avmap[1][0] + ((avmap[1][0] + 1) >> 1); // v offset = y+u plane size
-        avmap[2][1] = avmap[1][1]; // v stride = hstride
-        avmap[2][2] = avmap[1][2]; // v width = width
-        avmap[2][3] = avmap[1][3]; // v height = height / 2
-        size = avmap[1][0] * 2 + overshoot; // total size = y+u+v planesize
-        break;
-    case AV_PIX_FMT_NV24:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        // y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        // uv plane
-        avmap[1][0] = hstride * vstride; // uv offset = y plane size
-        avmap[1][1] = hstride << 1; // uv stride = hstride * 2
-        avmap[1][2] = width << 1; // uv width = width * 2
-        avmap[1][3] = height; // uv height = height
-        size = avmap[1][0] * 3 + overshoot; // total size = y+u+v planesize
-        break;
-    case AV_PIX_FMT_YUV444P:
-        hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
-        //y plane
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width,
-        avmap[0][3] = height;
-        //u plane
-        avmap[1][0] = hstride * vstride; // u offset = y plane size
-        avmap[1][1] = hstride; // u stride = hstride
-        avmap[1][2] = width; // u width = width
-        avmap[1][3] = height; // u height = height
-        //v plane
-        avmap[2][0] = avmap[1][0] * 2; // v offset = y+u plane size
-        avmap[2][1] = avmap[1][1]; // v stride = hstride
-        avmap[2][2] = avmap[1][2]; // v width = width
-        avmap[2][3] = avmap[1][3]; // v height = height
-        size = avmap[1][0] * 3 + overshoot; // total size = y+u+v planesize
-        break;
-    case AV_PIX_FMT_YUYV422:
-    case AV_PIX_FMT_UYVY422:
-        haspitch = 1;
-        hstride_mult = 2;
-        hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width << 1,
-        avmap[0][3] = height;
-        size = hstride * vstride;
-        break;
-    case AV_PIX_FMT_RGB24:
-    case AV_PIX_FMT_BGR24:
-        haspitch = 1;
-        hstride_mult = 3;
-        hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width * 3,
-        avmap[0][3] = height;
-        size = hstride * vstride;
-        break;
-    case AV_PIX_FMT_0RGB:
-    case AV_PIX_FMT_0BGR:
-    case AV_PIX_FMT_BGR0:
-    case AV_PIX_FMT_RGB0:
-    case AV_PIX_FMT_ARGB:
-    case AV_PIX_FMT_ABGR:
-    case AV_PIX_FMT_BGRA:
-    case AV_PIX_FMT_RGBA:
-        haspitch = 1;
-        hstride_mult = 4;
-        hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
-        avmap[0][0] = 0;
-        avmap[0][1] = hstride;
-        avmap[0][2] = width << 2,
-        avmap[0][3] = height;
-        size = hstride * vstride;
-        break;
-    }
-
+    // create buffer, assign strides and size props
     if(desc){
+        // and calculate strides and plane size from actual drm buffer
+        // note! this is not aligned to mpp requirements, but should be fine.
         MppBufferInfo info;
         AVDRMLayerDescriptor *layer = &desc->layers[0];
-        rkmpp_get_drm_format(&format, layer->format);
+        rkmpp_get_drm_format(rkformat, layer->format);
 
         size = desc->objects[0].size;
-        if(haspitch)
-            hstride = layer->planes[0].pitch;
-        else
-            hstride = layer->planes[0].pitch * hstride_mult;
+        hstride = layer->planes[0].pitch;
+        vstride = rkformat->numplanes == 1 ? size / hstride : layer->planes[1].offset / hstride;
 
-        if(planes == 1)
-            vstride = size / hstride;
-        else
-            vstride = layer->planes[1].offset / hstride;
-
+        size += overshoot;
         memset(&info, 0, sizeof(info));
         info.type   = MPP_BUFFER_TYPE_DRM;
         info.size   = size;
         info.fd     = desc->objects[0].fd;
 
         ret = mpp_buffer_import(&mppbuffer, &info);
-        rkmpp_get_drm_format(&format, layer->format);
     } else {
+        // use precalculated strides and size from rkmpp_planedata, this follow avctx context frame format
+        width = planedata->width;
+        height = planedata->height;
+        vstride = planedata->vstride;
+        hstride = planedata->hstride;
+        size = planedata->size + overshoot;
+
         ret = mpp_buffer_get(buffer_group, &mppbuffer, size);
-        rkmpp_get_av_format(&format, avformat);
+        if (ret)
+            goto clean;
+
+        // copy av frame to mpp buffer
+        if(frame){
+            for(int i = 0; i < rkformat->numplanes; i++){
+                CopyPlane(frame->data[i], frame->linesize[i],
+                        (char *)mpp_buffer_get_ptr(mppbuffer) + planedata->plane[i].offset,
+                        planedata->plane[i].hstride, planedata->plane[i].width, planedata->plane[i].height);
+            }
+        }
     }
 
-     if (ret)
-         goto clean;
+    ret = mpp_frame_init(&mppframe);
+    if (ret)
+        goto clean;
 
      mpp_frame_set_width(mppframe, width);
      mpp_frame_set_height(mppframe, height);
-     mpp_frame_set_fmt(mppframe, format.mpp);
+     mpp_frame_set_fmt(mppframe, rkformat->mpp);
      mpp_frame_set_hor_stride(mppframe, hstride);
      mpp_frame_set_ver_stride(mppframe, vstride);
      mpp_frame_set_buffer(mppframe, mppbuffer);
      mpp_frame_set_buf_size(mppframe, size);
      mpp_buffer_put(mppbuffer);
-
-     if(frame){
-         for(int i = 0; i < planes; i++){
-             CopyPlane(frame->data[i], frame->linesize[i],
-                     (char *)mpp_buffer_get_ptr(mppbuffer) + avmap[i][0], avmap[i][1], avmap[i][2], avmap[i][3]);
-         }
-     }
 
      return mppframe;
 
@@ -509,7 +321,7 @@ int mpp_nv15_av_yuv420p(AVCodecContext *avctx, MppFrame nv15frame, AVFrame *fram
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame nv12frame = create_mpp_frame(mpp_frame_get_width(nv15frame), mpp_frame_get_height(nv15frame),
-            AV_PIX_FMT_NV12, codec->buffer_group, NULL, NULL);
+            &rk_context->nv12format, codec->buffer_group, NULL, NULL, NULL);
     MppFrame yuv420pframe = NULL;
     int ret = rga_convert_mpp_mpp(avctx, nv15frame, nv12frame);
 
@@ -546,7 +358,7 @@ int mpp_nv15_av_nv12(AVCodecContext *avctx, MppFrame nv15frame, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame nv12frame = create_mpp_frame(mpp_frame_get_width(nv15frame), mpp_frame_get_height(nv15frame),
-            AV_PIX_FMT_NV12, codec->buffer_group, NULL, NULL);
+            &rk_context->nv12format, codec->buffer_group, NULL, NULL, &rk_context->nv12planes);
     int ret = rga_convert_mpp_mpp(avctx, nv15frame, nv12frame);
 
     rkmpp_release_mppframe(nv15frame, NULL);
@@ -599,27 +411,21 @@ MppFrame import_drm_to_mpp(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame mppframe = NULL;
     AVDRMFrameDescriptor *desc = (AVDRMFrameDescriptor*) frame->data[0];
-    AVDRMLayerDescriptor *layer = &desc->layers[0];
-    rkformat format;
-    char drmname[4];
-    DRMFORMATNAME(drmname, layer->format)
 
-    if(rkmpp_get_drm_format(&format, layer->format)){
-        av_log(avctx, AV_LOG_ERROR, "Unsupported DRM Format %s\n", drmname);
-        return NULL;
-    }
-
-    if(format.drm == DRM_FORMAT_NV15){
+    if(rk_context->rkformat.drm == DRM_FORMAT_NV15){
         // encoder does not support 10bit frames, we down scale them to 8bit
-        MppFrame nv15frame = create_mpp_frame(frame->width, frame->height, AV_PIX_FMT_NONE, NULL, desc, NULL);
+        MppFrame nv15frame = create_mpp_frame(frame->width, frame->height, &rk_context->rkformat, codec->buffer_group,
+                desc, NULL, NULL);
         if(nv15frame){
-            mppframe = create_mpp_frame(frame->width, frame->height, AV_PIX_FMT_NV12, codec->buffer_group, NULL, NULL);
+            mppframe = create_mpp_frame(frame->width, frame->height, &rk_context->nv12format, codec->buffer_group,
+                    NULL, NULL, &rk_context->nv12planes);
             if(mppframe && rga_convert_mpp_mpp(avctx, nv15frame, mppframe))
                 rkmpp_release_mppframe(mppframe, NULL);
             rkmpp_release_mppframe(nv15frame, NULL);
         }
     } else {
-        mppframe = create_mpp_frame(frame->width, frame->height, format.av, NULL, desc, NULL);
+        mppframe = create_mpp_frame(frame->width, frame->height, &rk_context->rkformat, NULL, desc,
+                NULL, NULL);
     }
 
     return mppframe;

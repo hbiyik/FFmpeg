@@ -23,21 +23,35 @@
 #include "rkmpp.h"
 
 static rkformat rkformats[15] = {
-        { .av = AV_PIX_FMT_YUV420P, .mpp = MPP_FMT_YUV420P,        .drm = DRM_FORMAT_YUV420,   .rga = RK_FORMAT_YCbCr_420_P},
-        { .av = AV_PIX_FMT_YUV422P, .mpp = MPP_FMT_YUV422P,        .drm = DRM_FORMAT_YUV422,   .rga = RK_FORMAT_YCbCr_422_P},
-        { .av = AV_PIX_FMT_NV12,    .mpp = MPP_FMT_YUV420SP,       .drm = DRM_FORMAT_NV12,     .rga = RK_FORMAT_YCbCr_420_SP},
-        { .av = AV_PIX_FMT_NV16,    .mpp = MPP_FMT_YUV422SP,       .drm = DRM_FORMAT_NV16,     .rga = RK_FORMAT_YCbCr_422_SP},
-        { .av = AV_PIX_FMT_NV15,    .mpp = MPP_FMT_YUV420SP_10BIT, .drm = DRM_FORMAT_NV15,     .rga = RK_FORMAT_YCbCr_420_SP_10B},
-        { .av = AV_PIX_FMT_BGR24,   .mpp = MPP_FMT_BGR888,         .drm = DRM_FORMAT_BGR888,   .rga = RK_FORMAT_BGR_888},
-        { .av = AV_PIX_FMT_RGBA,    .mpp = MPP_FMT_RGBA8888,       .drm = DRM_FORMAT_ABGR8888, .rga = RK_FORMAT_RGBA_8888},
-        { .av = AV_PIX_FMT_RGB0,    .mpp = MPP_FMT_RGBA8888,       .drm = DRM_FORMAT_XBGR8888, .rga = RK_FORMAT_RGBX_8888},
-        { .av = AV_PIX_FMT_BGRA,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_ARGB8888, .rga = RK_FORMAT_BGRA_8888},
-        { .av = AV_PIX_FMT_BGR0,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_XRGB8888, .rga = RK_FORMAT_BGRX_8888},
-        { .av = AV_PIX_FMT_BGR565,  .mpp = MPP_FMT_BGR565,         .drm = DRM_FORMAT_BGR565,   .rga = RK_FORMAT_BGR_565},
-        { .av = AV_PIX_FMT_YUYV422, .mpp = MPP_FMT_YUV422_YUYV,    .drm = DRM_FORMAT_YUYV,     .rga = RK_FORMAT_YUYV_422},
-        { .av = AV_PIX_FMT_UYVY422, .mpp = MPP_FMT_YUV422_UYVY,    .drm = DRM_FORMAT_UYVY,     .rga = RK_FORMAT_UYVY_422},
-        { .av = AV_PIX_FMT_NV24,    .mpp = MPP_FMT_YUV444SP,       .drm = DRM_FORMAT_NV24,     .rga = RK_FORMAT_UNKNOWN},
-        { .av = AV_PIX_FMT_YUV444P, .mpp = MPP_FMT_YUV444P,        .drm = DRM_FORMAT_YUV444,   .rga = RK_FORMAT_UNKNOWN},
+        { .av = AV_PIX_FMT_BGR24, .mpp = MPP_FMT_BGR888, .drm = DRM_FORMAT_BGR888, .rga = RK_FORMAT_BGR_888,
+                .numplanes = 1, .mode = MUL, .planedata = { .plane[0] = {.width = 3},}},
+        { .av = AV_PIX_FMT_RGBA, .mpp = MPP_FMT_RGBA8888, .drm = DRM_FORMAT_ABGR8888, .rga = RK_FORMAT_RGBA_8888,
+                .numplanes = 1, .mode = MUL, .planedata = { .plane[0] = {.width = 4},}},
+        { .av = AV_PIX_FMT_RGB0, .mpp = MPP_FMT_RGBA8888, .drm = DRM_FORMAT_XBGR8888, .rga = RK_FORMAT_RGBX_8888,
+                .numplanes = 1, .mode = MUL, .planedata = { .plane[0] = {.width = 4},}},
+        { .av = AV_PIX_FMT_BGRA, .mpp = MPP_FMT_BGRA8888, .drm = DRM_FORMAT_ARGB8888, .rga = RK_FORMAT_BGRA_8888,
+                .numplanes = 1, .mode = MUL, .planedata = { .plane[0] = {.width = 4},}},
+        { .av = AV_PIX_FMT_BGR0, .mpp = MPP_FMT_BGRA8888, .drm = DRM_FORMAT_XRGB8888, .rga = RK_FORMAT_BGRX_8888,
+                .numplanes = 1, .mode = MUL, .planedata = { .plane[0] = {.width = 4},}},
+        { .av = AV_PIX_FMT_YUYV422, .mpp = MPP_FMT_YUV422_YUYV, .drm = DRM_FORMAT_YUYV, .rga = RK_FORMAT_YUYV_422,
+                .numplanes = 1, .mode = MUL, .planedata = { .plane[0] = {.width = 2},}},
+        { .av = AV_PIX_FMT_UYVY422, .mpp = MPP_FMT_YUV422_UYVY, .drm = DRM_FORMAT_UYVY, .rga = RK_FORMAT_UYVY_422,
+                .numplanes = 1, .mode = MUL, .planedata = { .plane[0] = {.width = 2},}},
+        { .av = AV_PIX_FMT_NV12, .mpp = MPP_FMT_YUV420SP, .drm = DRM_FORMAT_NV12, .rga = RK_FORMAT_YCbCr_420_SP,
+                .numplanes = 2, .mode = SHR, .planedata = { .plane[1] = {.height = 1},}},
+        { .av = AV_PIX_FMT_NV15, .mpp = MPP_FMT_YUV420SP_10BIT, .drm = DRM_FORMAT_NV15, .rga = RK_FORMAT_YCbCr_420_SP_10B,
+                .numplanes = 2, .mode = SHR, .planedata = { .plane[1] = {.height = 1},}},
+        { .av = AV_PIX_FMT_NV16, .mpp = MPP_FMT_YUV422SP, .drm = DRM_FORMAT_NV16, .rga = RK_FORMAT_YCbCr_422_SP,
+                .numplanes = 2, .mode = SHR},
+        { .av = AV_PIX_FMT_NV24, .mpp = MPP_FMT_YUV444SP, .drm = DRM_FORMAT_NV24, .rga = RK_FORMAT_UNKNOWN,
+                .numplanes = 2, .mode = MUL, .planedata = { .plane[1] = {.width = 2, .hstride=2},}},
+        { .av = AV_PIX_FMT_YUV420P,.mpp = MPP_FMT_YUV420P, .drm = DRM_FORMAT_YUV420, .rga = RK_FORMAT_YCbCr_420_P,
+                .numplanes = 3, .mode = SHR, .planedata = { .plane[1] = {.width = 1, .height = 1, .hstride=1},}},
+        { .av = AV_PIX_FMT_YUV422P, .mpp = MPP_FMT_YUV422P,.drm = DRM_FORMAT_YUV422, .rga = RK_FORMAT_YCbCr_422_P,
+                .numplanes = 3, .mode = SHR, .planedata = { .plane[1] = {.hstride = 1}}},
+        { .av = AV_PIX_FMT_YUV444P, .mpp = MPP_FMT_YUV444P, .drm = DRM_FORMAT_YUV444,.rga = RK_FORMAT_UNKNOWN,
+                .numplanes = 3, .mode = SHR},
+        { .av = AV_PIX_FMT_BGR565, .mpp = MPP_FMT_BGR565, .drm = DRM_FORMAT_BGR565, .rga = RK_FORMAT_BGR_565},
 };
 
 #define GETFORMAT(NAME, TYPE)\
@@ -48,6 +62,9 @@ int rkmpp_get_##NAME##_format(rkformat *format, TYPE informat){ \
             format->mpp = rkformats[i].mpp;\
             format->drm = rkformats[i].drm;\
             format->rga = rkformats[i].rga;\
+            format->numplanes = rkformats[i].numplanes;\
+            format->mode = rkformats[i].mode;\
+            format->planedata = rkformats[i].planedata;\
             return 0;\
         }\
     }\
@@ -58,6 +75,45 @@ GETFORMAT(drm, uint32_t)
 GETFORMAT(mpp, MppFrameFormat)
 GETFORMAT(rga, enum _Rga_SURF_FORMAT)
 GETFORMAT(av, enum AVPixelFormat)
+
+int rkmpp_planedata(rkformat *format, planedata *planes, int width, int height, int align){
+    int hstride, totalsize = 0;
+
+    planes->avformat = format->av;
+    planes->vstride = FFALIGN(height, align);;
+    planes->width = width;
+    planes->height = height;
+    planes->hstride = format->numplanes == 1 ? FFALIGN(width * format->planedata.plane[0].width, align) :  FFALIGN(width, align);
+    hstride = planes->hstride;
+
+    for(int i=0; i<format->numplanes; i++){
+
+        if(format->mode == SHR){
+            if(format->planedata.plane[i].width)
+                width = width >> format->planedata.plane[i].width;
+            if(format->planedata.plane[i].height)
+                height = height >> format->planedata.plane[i].height;
+            if(format->planedata.plane[i].hstride)
+                hstride = hstride >> format->planedata.plane[i].hstride;
+        } else if(format->mode == MUL){
+            if(format->planedata.plane[i].width)
+                width = width * format->planedata.plane[i].width;
+            if(format->planedata.plane[i].height)
+                height = height * format->planedata.plane[i].height;
+            if(format->planedata.plane[i].hstride)
+                hstride = hstride * format->planedata.plane[i].hstride;
+        }
+        planes->plane[i].width = width;
+        planes->plane[i].height = height;
+        planes->plane[i].hstride = hstride;
+        planes->plane[i].size =  planes->plane[i].hstride * FFALIGN(height, align);;
+        planes->plane[i].offset = totalsize;
+        totalsize += planes->plane[i].size;
+    }
+
+    planes->size = totalsize;
+    return 0;
+}
 
 MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx)
 {
@@ -189,7 +245,24 @@ int rkmpp_init_codec(AVCodecContext *avctx)
         goto fail;
     }
 
-    av_log(avctx, AV_LOG_INFO, "Picture format is %s.\n", av_get_pix_fmt_name(avctx->pix_fmt));
+    // when the pixfmt is drmprime,
+    // decoder: we rely on mpp decoder to detect the actual frame format when first frame decoded
+    // encoder: we rely on fist avframe received to encoder
+    // normally, avctx should have actual frame format but due to missing implementation of other
+    // devices/encoders/decoders, we dont rely on them
+    if(!rkmpp_get_av_format(&rk_context->rkformat, avctx->pix_fmt))
+        rkmpp_planedata(&rk_context->rkformat, &rk_context->avplanes,avctx->width, avctx->height, RKMPP_STRIDE_ALIGN);
+    else if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME)
+        av_log(avctx, AV_LOG_INFO, "Picture format is %s.\n", av_get_pix_fmt_name(avctx->pix_fmt)); // detect actual format later
+    else {
+        av_log(avctx, AV_LOG_ERROR, "Unknown Picture format %s.\n", av_get_pix_fmt_name(avctx->pix_fmt)); // most likely never branches here
+        ret = AVERROR_UNKNOWN;
+        goto fail;
+    }
+
+    //nv12 format calcuöations are necessary for for NV15->NV12 conversion
+    rkmpp_get_av_format(&rk_context->nv12format, AV_PIX_FMT_NV12);
+    rkmpp_planedata(&rk_context->nv12format, &rk_context->nv12planes, avctx->width, avctx->height, RKMPP_STRIDE_ALIGN);
 
     // initialize mpp
     ret = mpp_init(codec->ctx, codec->mppctxtype, codectype);
@@ -213,6 +286,7 @@ int rkmpp_init_codec(AVCodecContext *avctx)
     }
 
     ret = codec->init_callback(avctx);
+
     if(ret){
         av_log(avctx, AV_LOG_ERROR, "Failed to init Codec (code = %d).\n", ret);
         goto fail;
