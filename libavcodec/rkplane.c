@@ -95,25 +95,78 @@ static int set_drmdesc_to_avbuff(AVDRMFrameDescriptor *desc, AVFrame *frame){
     return i;
 }
 
+static int get_plane_count(enum AVPixelFormat avformat){
+    int planes = 0;
+    switch(avformat){
+    case AV_PIX_FMT_NV12:
+    case AV_PIX_FMT_NV15:
+    case AV_PIX_FMT_NV16:
+    case AV_PIX_FMT_NV24:
+        planes = 2;
+        break;
+    case AV_PIX_FMT_YUV420P:
+    case AV_PIX_FMT_YUV422P:
+    case AV_PIX_FMT_YUV444P:
+        planes = 3;
+        break;
+    case AV_PIX_FMT_YUYV422:
+    case AV_PIX_FMT_UYVY422:
+    case AV_PIX_FMT_RGB24:
+    case AV_PIX_FMT_BGR24:
+    case AV_PIX_FMT_0RGB:
+    case AV_PIX_FMT_0BGR:
+    case AV_PIX_FMT_BGR0:
+    case AV_PIX_FMT_RGB0:
+    case AV_PIX_FMT_ARGB:
+    case AV_PIX_FMT_ABGR:
+    case AV_PIX_FMT_BGRA:
+    case AV_PIX_FMT_RGBA:
+        planes = 1;
+        break;
+    }
+    return planes;
+}
+
 static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height,
         uint64_t dst_fd, uint64_t dst_y, uint16_t dst_width, uint16_t dst_height,
-        enum _Rga_SURF_FORMAT informat, enum _Rga_SURF_FORMAT outformat){
+        MppFrameFormat informat, MppFrameFormat outformat){
+    int src_wpixstride, src_hpixstride, dst_wpixstride, dst_hpixstride = 0;
+    rkformat _informat, _outformat;
     rga_info_t src = {0};
     rga_info_t dst = {0};
+
+    rkmpp_get_mpp_format(&_informat, informat & MPP_FRAME_FMT_MASK);
+    rkmpp_get_mpp_format(&_outformat, outformat & MPP_FRAME_FMT_MASK);
+
+    if(get_plane_count(_informat.av) == 1){
+        src_wpixstride = src_width;
+        src_hpixstride = src_height;
+    } else {
+        src_wpixstride = FFALIGN(src_width, RKMPP_STRIDE_ALIGN);
+        src_hpixstride = FFALIGN(src_height, RKMPP_STRIDE_ALIGN);
+    }
+
+    if(get_plane_count(_outformat.av) == 1){
+        dst_wpixstride = dst_width;
+        dst_hpixstride = dst_height;
+    } else {
+        dst_wpixstride = FFALIGN(dst_width, RKMPP_STRIDE_ALIGN);
+        dst_hpixstride = FFALIGN(dst_height, RKMPP_STRIDE_ALIGN);
+    }
 
     src.fd = src_fd;
     src.virAddr = (void *)src_y;
     src.mmuFlag = 1;
     src.format = informat;
     rga_set_rect(&src.rect, 0, 0,
-            src_width, src_height, FFALIGN(src_width, RKMPP_STRIDE_ALIGN), FFALIGN(src_height, RKMPP_STRIDE_ALIGN), informat);
+            src_width, src_height, src_wpixstride, src_hpixstride, _informat.rga);
 
     dst.fd = dst_fd;
     dst.virAddr = (void *)dst_y;
     dst.mmuFlag = 1;
     dst.format = outformat;
     rga_set_rect(&dst.rect, 0, 0,
-            dst_width, dst_height, FFALIGN(dst_width, RKMPP_STRIDE_ALIGN), FFALIGN(dst_height, RKMPP_STRIDE_ALIGN), outformat);
+            dst_width, dst_height, dst_wpixstride, dst_hpixstride, _outformat.rga);
 
     return c_RkRgaBlit(&src, &dst, NULL);
 }
@@ -121,19 +174,16 @@ static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16
 int rga_convert_mpp_mpp(AVCodecContext *avctx, MppFrame in_mppframe, MppFrame out_mppframe){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    rkformat informat, outformat;
 
     if (!codec->norga){
         if(!out_mppframe)
             return -1;
-        rkmpp_get_mpp_format(&informat, mpp_frame_get_fmt(in_mppframe) & MPP_FRAME_FMT_MASK);
-        rkmpp_get_mpp_format(&outformat, mpp_frame_get_fmt(out_mppframe) & MPP_FRAME_FMT_MASK);
         if(rga_scale(mpp_buffer_get_fd(mpp_frame_get_buffer(in_mppframe)), 0,
             mpp_frame_get_width(in_mppframe), mpp_frame_get_height(in_mppframe),
             mpp_buffer_get_fd(mpp_frame_get_buffer(out_mppframe)), 0,
             mpp_frame_get_width(out_mppframe), mpp_frame_get_height(out_mppframe),
-            informat.rga,
-            outformat.rga)){
+            mpp_frame_get_fmt(in_mppframe),
+            mpp_frame_get_fmt(out_mppframe))){
                 av_log(avctx, AV_LOG_WARNING, "RGA failed falling back to soft conversion\n");
                 codec->norga = 1; // fallback to soft conversion
                 return -1;
@@ -243,7 +293,7 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
     int avmap[3][4]; //offset, dststride, width, height of max 3 planes
     int size, ret, hstride, vstride;
     int hstride_mult = 1;
-    int planes = 2;
+    int planes = get_plane_count(avformat);
     int haspitch = 0;
     int overshoot = 1024;
 
@@ -257,7 +307,6 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
 
     switch(avformat){
     case AV_PIX_FMT_NV12:
-        planes = 2;
         hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
         // y plane
         avmap[0][0] = 0;
@@ -272,7 +321,6 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         size = avmap[1][0] + ((avmap[1][0] + 1) >> 1) + overshoot; // total size = y+uv planesize
         break;
     case AV_PIX_FMT_YUV420P:
-        planes = 3;
         hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
         // y plane
         avmap[0][0] = 0;
@@ -292,7 +340,6 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         size = avmap[2][0] + ((avmap[1][0] + 1) >> 2) + overshoot; // total size = y+u+v planesize
         break;
     case AV_PIX_FMT_NV16:
-        planes = 2;
         hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
         // y plane
         avmap[0][0] = 0;
@@ -307,7 +354,6 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         size = avmap[1][0] * 2 + overshoot; // total size = y+uv planesize
         break;
     case AV_PIX_FMT_YUV422P:
-        planes = 3;
         hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
         //y plane
         avmap[0][0] = 0;
@@ -327,7 +373,6 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         size = avmap[1][0] * 2 + overshoot; // total size = y+u+v planesize
         break;
     case AV_PIX_FMT_NV24:
-        planes = 2;
         hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
         // y plane
         avmap[0][0] = 0;
@@ -342,7 +387,6 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         size = avmap[1][0] * 3 + overshoot; // total size = y+u+v planesize
         break;
     case AV_PIX_FMT_YUV444P:
-        planes = 3;
         hstride = FFALIGN(width, RKMPP_STRIDE_ALIGN);
         //y plane
         avmap[0][0] = 0;
@@ -363,7 +407,6 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         break;
     case AV_PIX_FMT_YUYV422:
     case AV_PIX_FMT_UYVY422:
-        planes = 1;
         haspitch = 1;
         hstride_mult = 2;
         hstride = FFALIGN(width * hstride_mult, RKMPP_STRIDE_ALIGN);
@@ -383,7 +426,6 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         avmap[0][2] = width * 3,
         avmap[0][3] = height;
         size = hstride * vstride;
-        planes = 1;
         break;
     case AV_PIX_FMT_0RGB:
     case AV_PIX_FMT_0BGR:
@@ -401,7 +443,6 @@ MppFrame create_mpp_frame(int width, int height, enum AVPixelFormat avformat, Mp
         avmap[0][2] = width << 2,
         avmap[0][3] = height;
         size = hstride * vstride;
-        planes = 1;
         break;
     }
 
