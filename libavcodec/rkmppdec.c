@@ -19,216 +19,694 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include "rkmpp.h"
-#include "rkplane.h"
 
+static void rkmpp_frame_timestamp(MppFrameItem* item){
+    clock_gettime(CLOCK_MONOTONIC, &item->timestamp);
+}
+
+static void rkmpp_frame_logtimecsv(AVCodecContext *avctx, MppFrameItem* item){
+    RKMPPCodecContext *rk_context = avctx->priv_data;
+    if (!rk_context->timing)
+        return;
+    if(item->old_timestamp.tv_sec)
+        av_log(avctx, AV_LOG_INFO, "%lu,%lu,%lu,%lu,%lu,%lu,%lu\n",
+                item->framenum,
+                item->old_timestamp.tv_sec,
+                item->old_timestamp.tv_nsec,
+                item->timestamp.tv_sec,
+                item->timestamp.tv_nsec,
+                item->rga->timestamp.tv_sec,
+                item->rga->timestamp.tv_nsec);
+    else
+        av_log(avctx, AV_LOG_INFO, "%lu,%lu,%lu,%lu,%lu\n",
+                        item->framenum,
+                        item->timestamp.tv_sec,
+                        item->timestamp.tv_nsec,
+                        item->rga->timestamp.tv_sec,
+                        item->rga->timestamp.tv_nsec);
+}
 
 int rkmpp_init_decoder(AVCodecContext *avctx){
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-
+    MppFrameFormat afbc = MPP_FRAME_FBC_AFBC_V2;
+    MppCompat *compatItem = NULL;
+    char *env;
     int ret;
 
-    ret = codec->mpi->control(codec->ctx, MPP_DEC_SET_EXT_BUF_GROUP, codec->buffer_group);
-    if (ret) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to assign buffer group (code = %d)\n", ret);
-        return AVERROR_UNKNOWN;
-    }
+    avctx->coded_width = FFALIGN(avctx->width, 64);
+    avctx->coded_height = FFALIGN(avctx->height, 64);
 
-    codec->mpi->control(codec->ctx, MPP_DEC_SET_DISABLE_ERROR, NULL);
+    ret = rk_context->mpi->control(rk_context->ctx, MPP_DEC_SET_DISABLE_ERROR, NULL) == MPP_OK;
     if (ret < 0) {
         av_log(avctx, AV_LOG_ERROR, "Failed to prepare Codec (code = %d)\n", ret);
         return AVERROR_UNKNOWN;
     }
 
-    avctx->coded_width = FFALIGN(avctx->width, 64);
-    avctx->coded_height = FFALIGN(avctx->height, 64);
-
-    codec->hwdevice_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_DRM);
-    if (!codec->hwdevice_ref) {
+    rk_context->hwdevice_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_DRM);
+    if (!rk_context->hwdevice_ref) {
         return AVERROR(ENOMEM);
     }
 
-    ret = av_hwdevice_ctx_init(codec->hwdevice_ref);
+    ret = av_hwdevice_ctx_init(rk_context->hwdevice_ref);
     if (ret < 0)
         return ret;
 
-    av_buffer_unref(&codec->hwframes_ref);
-    codec->hwframes_ref = av_hwframe_ctx_alloc(codec->hwdevice_ref);
-    if (!codec->hwframes_ref) {
+    av_buffer_unref(&rk_context->hwframes_ref);
+    rk_context->hwframes_ref = av_hwframe_ctx_alloc(rk_context->hwdevice_ref);
+    if (!rk_context->hwframes_ref) {
         return AVERROR(ENOMEM);
     }
+
+    // not aligning to odds of 256 saves up to %20~%25 memory size
+    compatItem = mpp_compat_query_by_id(MPP_COMPAT_DEC_FBC_HDR_256_ODD);
+    mpp_compat_update(compatItem, 0);
+#if 0
+    // check https://github.com/rockchip-linux/mpp/issues/422#issuecomment-1784178924
+    compatItem = mpp_compat_query_by_id(MPP_COMPAT_DEC_NFBC_NO_256_ODD);
+    mpp_compat_update(compatItem, 0);
+#endif
+    rk_context->mpp_decode_fifo.limit = -1;
+    rk_context->mpp_rga_fifo.limit = -1;
+
+    // override the the pixfmt according env variable
+    env = getenv("FFMPEG_RKMPP_PIXFMT");
+    if(env != NULL){
+        avctx->pix_fmt = av_get_pix_fmt(env);
+        if(avctx->pix_fmt == AV_PIX_FMT_NONE){
+            av_log(avctx, AV_LOG_ERROR, "Unknown format %s\n", env);
+            return AVERROR_UNKNOWN;
+        }
+    } else {
+        // check if selected format is supported
+        enum AVPixelFormat fmt = avctx->pix_fmt;
+        avctx->pix_fmt = AV_PIX_FMT_NONE;
+        for (int n = 0; avctx->codec->pix_fmts[n] != AV_PIX_FMT_NONE; n++){
+            if(fmt == avctx->codec->pix_fmts[n])
+                avctx->pix_fmt = avctx->codec->pix_fmts[n];
+        }
+        // if not auto select
+        if (avctx->pix_fmt == AV_PIX_FMT_NONE)
+            avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
+    }
+
+    env = getenv("FFMPEG_RKMPP_DRMHDRBITS");
+    if (env != NULL){
+        if(!strcmp("8", env))
+            rk_context->drm_hdrbits = 8;
+        else if(!strcmp("10", env))
+            rk_context->drm_hdrbits = 10;
+        else if(!strcmp("16", env))
+            rk_context->drm_hdrbits = 16;
+        else {
+            av_log(avctx, AV_LOG_ERROR, "unknown drmhdrbits value, valid values are 8: NV12, 10: NV15, 16:p010, default is 16\n");
+            return AVERROR_UNKNOWN;
+        }
+    } else
+        rk_context->drm_hdrbits = 16;
+
+    env = getenv("FFMPEG_RKMPP_AFBC");
+    if (env != NULL){
+        // https://github.com/rockchip-linux/mpp/issues/453?#issuecomment-1776324884
+        if(rkmpp_get_codingtype(avctx) == MPP_VIDEO_CodingAV1)
+            ret = 0;
+        else
+            ret = rk_context->mpi->control(rk_context->ctx, MPP_DEC_SET_OUTPUT_FORMAT, &afbc);
+        if (ret) {
+            av_log(avctx, AV_LOG_ERROR, "can not set afbc format");
+            return AVERROR_UNKNOWN;
+        } else
+            rk_context->fbc = 1;
+    }
+
+    env = getenv("FFMPEG_RKMPP_LIBYUV");
+    if(avctx->pix_fmt == AV_PIX_FMT_YUV420P10LE || avctx->pix_fmt == AV_PIX_FMT_YUV444P || \
+            ((avctx->width > 3840 || avctx->height > 2160 || env != NULL) && \
+            (avctx->pix_fmt == AV_PIX_FMT_YUV420P || \
+             avctx->pix_fmt == AV_PIX_FMT_YUV422P))){
+        rk_context->libyuv = 1;
+        av_log(avctx, AV_LOG_INFO, "Using partial libyuv soft conversion for %s (%dx%d)\n",
+                av_get_pix_fmt_name(avctx->pix_fmt), avctx->width, avctx->height);
+    }
+
+    env = getenv("FFMPEG_RKMPP_TIMING");
+    if (env != NULL)
+        rk_context->timing = !!atoi(env);
 
     return 0;
 }
 
-static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
-{
+static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
+    MppFrameFormat mpp_format = mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK;
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    MppFrameFormat mpp_format;
+    int isfbc=MPP_FRAME_FMT_IS_FBC(mpp_frame_get_fmt(mppframe));
+    int ret=0;
+
+    if(rk_context->fbc && !isfbc){
+        av_log(avctx, AV_LOG_WARNING, "AFBC mode is requested but decoder does not support it, not using AFBC\n");
+        rk_context->fbc = 0;
+    }
+
+    rkmpp_get_mpp_format(&rk_context->informat, mpp_format, avctx->width, avctx->height, 0,
+            mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), mpp_frame_get_offset_y(mppframe),
+            mpp_frame_get_buf_size(mppframe), 0);
+
+    rk_context->informat.fbc = isfbc;
+
+    // determine the decoding flow
+    if(rk_context->hascfg)
+        return AVERROR(EAGAIN);
+    else if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+        AVHWFramesContext *hwframes;
+        if(rk_context->informat.av == AV_PIX_FMT_NV15){
+            if(rk_context->drm_hdrbits == 16) // P010
+                rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_P010LE,
+                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+            else if (rk_context->drm_hdrbits == 8) // NV12
+                rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_NV12,
+                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+            rk_context->codec_flow = CONVERT;
+        }
+        if(!rk_context->outformat.numplanes){
+            rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
+                    avctx->width, avctx->height, 0,
+                    mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
+                    mpp_frame_get_buf_size(mppframe), 0);
+            rk_context->codec_flow = NOCONVERSION;
+        }
+        hwframes = (AVHWFramesContext*)rk_context->hwframes_ref->data;
+        hwframes->format = AV_PIX_FMT_DRM_PRIME;
+        hwframes->sw_format = rk_context->outformat.av;
+        hwframes->width = rk_context->outformat.planedata.width;
+        hwframes->height = rk_context->outformat.planedata.height;
+        ret = av_hwframe_ctx_init(rk_context->hwframes_ref);
+    } else if (avctx->pix_fmt != rk_context->informat.av){
+        // check if we need swapping the mpp frames
+        if( avctx->pix_fmt == AV_PIX_FMT_YUV420P10LE){
+            // nv15(mpp) -> P010(rga3, swap) -> YUV420P10 (soft)
+            rkmpp_get_av_format(&rk_context->swapformat, AV_PIX_FMT_P010LE,
+                    avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+            // important note:
+            // normally, P010 is msb aligned, with little endian byte order and LSB bit order
+            // we force rga to output lsb aligned planes because,
+            // the output format YUV420P10 is lsb aligned. This swap frame is no more P010
+            // it does not have a name, but will be YUV420P10LE after UV Planes are split
+            rk_context->swapformat.rga_msb_aligned = 0;
+            rk_context->codec_flow = SWAPANDCONVERT;
+        } else if (rk_context->informat.av == AV_PIX_FMT_NV15 && // 10bit to 8 bit case
+                (avctx->pix_fmt == AV_PIX_FMT_YUV420P || avctx->pix_fmt == AV_PIX_FMT_YUV422P || avctx->pix_fmt == AV_PIX_FMT_YUV444P)){
+           // nv15(mpp) -> NV12(rga3, swap) -> YUV420P (rga2 or soft when >4k)
+            rkmpp_get_av_format(&rk_context->swapformat, AV_PIX_FMT_NV12,
+                    avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+            rk_context->codec_flow = SWAPANDCONVERT;
+        } else if (rk_context->informat.fbc && rk_context->libyuv){ // libyuv needs uncompressed Y plane
+            rkmpp_get_av_format(&rk_context->swapformat, rk_context->informat.av,
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+            rk_context->codec_flow = SWAPANDCONVERT;
+        } else if (rk_context->informat.fbc && // rga2 can not afbc
+                (avctx->pix_fmt == AV_PIX_FMT_YUV420P || avctx->pix_fmt == AV_PIX_FMT_YUV422P || avctx->pix_fmt == AV_PIX_FMT_YUV444P)){
+            rkmpp_get_av_format(&rk_context->swapformat, rk_context->informat.av,
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+            rk_context->codec_flow = SWAPANDCONVERT;
+        } else
+            rk_context->codec_flow = CONVERT;
+
+        // determine the output format
+        if(rk_context->codec_flow == SWAPANDCONVERT){ // give libyuv swap format u plane
+            rkmpp_get_av_format(&rk_context->outformat, avctx->pix_fmt,
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0,
+                            rk_context->libyuv ? &rk_context->swapformat.factors[1] : 0);
+        } else if(rk_context->codec_flow == CONVERT){ // give libyuv input format u plane
+            rkmpp_get_av_format(&rk_context->outformat, avctx->pix_fmt,
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0,
+                            rk_context->libyuv ? &rk_context->informat.factors[1] : 0);
+        }
+
+    } else if (rk_context->informat.fbc) {
+        rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
+                avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+        rk_context->codec_flow = CONVERT;
+    } else {
+        rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
+                avctx->width, avctx->height, 0,
+                mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
+                mpp_frame_get_buf_size(mppframe), 0);
+        rk_context->codec_flow = NOCONVERSION;
+    }
+
+    // log decoding flow
+    switch(rk_context->codec_flow){
+    case SWAPANDCONVERT:
+        av_log(avctx, AV_LOG_INFO, "Pixfmt (%s), Conversion (%s%s->%s->%s%s)\n",
+                av_get_pix_fmt_name(avctx->pix_fmt),
+                av_get_pix_fmt_name(rk_context->informat.av),
+                isfbc ? "[FBC]" : "",
+                av_get_pix_fmt_name(rk_context->swapformat.av),
+                av_get_pix_fmt_name(rk_context->outformat.av),
+                rk_context->libyuv ? "[LIBYUV]" : "");
+        if(rk_context->swapformat.qual > rk_context->outformat.qual)
+            av_log(avctx, AV_LOG_WARNING, "Potential quality loss on conversion.\n");
+        break;
+    case CONVERT:
+        av_log(avctx, AV_LOG_INFO, "Pixfmt (%s), Conversion (%s%s->%s%s)\n",
+                av_get_pix_fmt_name(avctx->pix_fmt),
+                av_get_pix_fmt_name(rk_context->informat.av),
+                isfbc ? "[FBC]" : "",
+                av_get_pix_fmt_name(rk_context->outformat.av),
+                rk_context->libyuv ? "[LIBYUV]" : "");
+        if(rk_context->informat.qual > rk_context->outformat.qual)
+            av_log(avctx, AV_LOG_WARNING, "Potential quality loss on conversion.\n");
+        break;
+    case NOCONVERSION:
+        av_log(avctx, AV_LOG_INFO, "Pixfmt (%s), Decoder Output (%s%s)\n",
+                av_get_pix_fmt_name(avctx->pix_fmt),
+                av_get_pix_fmt_name(rk_context->informat.av),
+                isfbc ? "[FBC]" : "");
+        break;
+    }
+
+    rk_context->dma_dec_count=10; // per core
+    rk_context->dma_swap_count=3; // one for each core
+    rk_context->dma_rga_count=RKMPP_RENDER_DEPTH;
+
+    // when the decoder is dual core, we need double the size of buffers
+    // H26x decoder can also be single core but there are dual core version
+    // since we can not know this, we assume the worst case
+    switch (rkmpp_get_codingtype(avctx)){
+    case MPP_VIDEO_CodingAVC:
+    case MPP_VIDEO_CodingHEVC:
+        rk_context->dma_dec_count += 8;
+        break;
+    }
+
+    // decoder frames are hold until rendering is finished
+    if(rk_context->codec_flow == NOCONVERSION || (rk_context->libyuv && rk_context->codec_flow == CONVERT))
+        rk_context->dma_dec_count += RKMPP_RENDER_DEPTH;
+    // swap frame are hold until rendering is finished
+    else if(rk_context->codec_flow == SWAPANDCONVERT && rk_context->libyuv)
+        rk_context->dma_swap_count += RKMPP_RENDER_DEPTH;
+
+    rk_context->mpp_decode_fifo.limit = 2;
+    rk_context->mpp_rga_fifo.limit = 2;
+
+    // allocate codec buffers
+    ret = rkmpp_buffer_alloc(avctx, rk_context->informat.planedata.overshoot,
+            &rk_context->buffer_group, rk_context->dma_dec_count);
+    if (ret) {
+       av_log(avctx, AV_LOG_ERROR, "Failed allocate mem for codec (code = %d)\n", ret);
+       return AVERROR_UNKNOWN;
+    }
+
+    //set decoder external buffer
+    ret = rk_context->mpi->control(rk_context->ctx, MPP_DEC_SET_EXT_BUF_GROUP, rk_context->buffer_group);
+    if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to assign buffer group for codec (code = %d)\n", ret);
+        return AVERROR_UNKNOWN;
+    }
+
+    //allocate swap buffers
+    if(rk_context->codec_flow == SWAPANDCONVERT){
+        ret = rkmpp_buffer_alloc(avctx, rk_context->swapformat.planedata.overshoot,
+                &rk_context->buffer_group_swap, rk_context->dma_swap_count);
+        if (ret) {
+           av_log(avctx, AV_LOG_ERROR, "Failed to allocate memory for swap (code = %d)\n", ret);
+           return AVERROR_UNKNOWN;
+        }
+    }
+
+    // allocate output buffers
+    if (rk_context->codec_flow != NOCONVERSION){
+        ret = rkmpp_buffer_alloc(avctx, rk_context->outformat.planedata.overshoot,
+                &rk_context->buffer_group_rga, rk_context->dma_rga_count);
+        if (ret) {
+           av_log(avctx, AV_LOG_ERROR, "Failed to allocate memory for rga (code = %d)\n", ret);
+           return AVERROR_UNKNOWN;
+        }
+    }
+
+    rk_context->hascfg = 1;
+
+    return 0;
+}
+static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame){
+    RKMPPCodecContext *rk_context = avctx->priv_data;
+    MppFrameItem* item = rk_context->mpp_rga_fifo.first;
+    MppFrameItem* outitem = NULL;
+    AVDRMFrameDescriptor *desc = NULL;
+    MppBuffer mppbuffer = NULL;
+    int mpp_mode, ret;
+
+    if(!item){
+        // In case last frame is received and eof is sent afterwards. Check if buffer is empty and EOF.
+        if(!rk_context->mpp_rga_fifo.last && rk_context->eof)
+            return AVERROR_EOF;
+        av_log(avctx, AV_LOG_TRACE, "Waiting to receive output frame.\n");
+        return AVERROR(EAGAIN);
+    }
+
+    // poll rga status
+    ret = rkmpp_rga_wait(item->rga, MPP_TIMEOUT_NON_BLOCK, &item->timestamp);
+    if(ret == AVERROR_UNKNOWN){
+        av_log(avctx, AV_LOG_ERROR, "RGA timed out for out fifo frame %ld. Dropped\n", item->framenum);
+        rkmpp_fifo_pop(&rk_context->mpp_rga_fifo);
+        goto clean;
+    } else if (ret < 0)
+        return AVERROR(EAGAIN);
+
+    if(item->rga)
+        rkmpp_frame_timestamp(item->rga);
+    rkmpp_frame_logtimecsv(avctx, item);
+    av_log(avctx, AV_LOG_DEBUG, "Received frame %ld for outputting.\n", item->framenum);
+
+    rkmpp_fifo_pop(&rk_context->mpp_rga_fifo);
+    // check if we need to preserve the input frame until the end of rendering.
+    if(!rk_context->libyuv && item->rga){
+        MppFrameItem* item_orig = item;
+        // we are done with input, clear it
+        item = item->rga;
+        item->framenum = item_orig->framenum;
+        item_orig->rga = NULL;
+        rkmpp_release_mppframe_item(item_orig, NULL);
+        outitem = item;
+    } else {
+        outitem = item->rga ? item->rga : item;
+        outitem->framenum = item->rga ? item->rga->framenum : item->framenum;
+    }
+
+    // keep output frame until rendering is finished
+    if(rkmpp_set_mppframe_to_av(avctx, item, frame, RKMPP_MPPFRAME_BUFINDEX)){
+        ret = AVERROR(ENOMEM);
+        av_log(avctx, AV_LOG_ERROR, "Error setting output frame %ld to avbuffer.\n", item->framenum);
+        goto clean;
+    }
+
+    // extract frame properties to avframe
+    mpp_mode = mpp_frame_get_mode(outitem->mppframe);
+    frame->format = outitem->format->av;
+    frame->width = mpp_frame_get_width(outitem->mppframe);
+    frame->height =  mpp_frame_get_height(outitem->mppframe);
+    frame->color_range = mpp_frame_get_color_range(outitem->mppframe);
+    frame->color_primaries = mpp_frame_get_color_primaries(outitem->mppframe);
+    frame->color_trc = mpp_frame_get_color_trc(outitem->mppframe);
+    frame->colorspace = mpp_frame_get_colorspace(outitem->mppframe);
+    frame->pts = mpp_frame_get_pts(outitem->mppframe);
+    frame->interlaced_frame = ((mpp_mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_DEINTERLACED);
+    frame->top_field_first  = ((mpp_mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_TOP_FIRST);
+
+
+    // wrap the mppframe buffer to AVFrame
+    if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+        AVDRMLayerDescriptor *layer = NULL;
+        mppbuffer = mpp_frame_get_buffer(outitem->mppframe);
+
+        desc = av_mallocz(sizeof(AVDRMFrameDescriptor));
+        if (!desc || rkmpp_set_drmdesc_to_av(desc, frame) < 0) {
+            av_log(avctx, AV_LOG_ERROR, "Error allocating drm descriptor for frame %ld.\n", outitem->framenum);
+            ret = AVERROR(ENOMEM);
+            goto clean;
+        }
+
+        desc->nb_objects = 1;
+        desc->objects[0].fd = mpp_buffer_get_fd(mppbuffer);
+        desc->objects[0].size = mpp_buffer_get_size(mppbuffer);
+
+        desc->nb_layers = 1;
+        layer = &desc->layers[0];
+
+        if(outitem->format->fbc){
+            layer->format = outitem->format->drm_fbc;
+            layer->nb_planes = 1;
+            layer->planes[0].object_index = 0;
+            layer->planes[0].offset = outitem->format->planedata.plane[0].offset;
+            for(int i=0; i < outitem->format->numplanes; i++){
+                layer->planes[i].pitch += outitem->format->planedata.plane[i].hstride;
+            }
+            desc->objects[0].format_modifier =  DRM_FORMAT_MOD_ARM_AFBC(AFBC_FORMAT_MOD_BLOCK_SIZE_16x16 | AFBC_FORMAT_MOD_SPARSE);
+        } else {
+            layer->nb_planes = outitem->format->numplanes;
+            layer->format = outitem->format->drm;
+            for(int i=0; i < outitem->format->numplanes; i++){
+                layer->planes[i].object_index = 0;
+                layer->planes[i].offset = outitem->format->planedata.plane[i].offset;
+                layer->planes[i].pitch = outitem->format->planedata.plane[i].hstride;
+            }
+        }
+
+        frame->data[0]  = (uint8_t *)desc;
+        frame->hw_frames_ctx = av_buffer_ref(rk_context->hwframes_ref);
+        frame->format = AV_PIX_FMT_DRM_PRIME;
+        if (!frame->hw_frames_ctx) {
+            ret = AVERROR(ENOMEM);
+            av_log(avctx, AV_LOG_ERROR, "Error allocating drm hwframe for frame %ld.\n", outitem->framenum);
+            goto clean;
+        }
+    } else {
+        uint8_t* bufferaddr = mpp_buffer_get_ptr(mpp_frame_get_buffer(outitem->mppframe));
+
+        for(int i=0; i < outitem->format->numplanes; i++){
+            frame->data[i] = bufferaddr + outitem->format->planedata.plane[i].offset;
+            frame->linesize[i] = outitem->format->planedata.plane[i].hstride;
+        }
+        // when soft converting yuv framenum we only convert uv plane to outframe, y plane is still on inframe
+        if(rk_context->libyuv){
+            frame->data[0] = (uint8_t *)mpp_buffer_get_ptr(mpp_frame_get_buffer(item->mppframe)) + item->format->planedata.plane[0].offset;
+            frame->linesize[0] = mpp_frame_get_hor_stride(item->mppframe);
+        }
+        frame->extended_data = frame->data;
+        frame->format = outitem->format->av;
+    }
+
+    if(rk_context->eof == item->framenum)
+        ret = AVERROR_EOF;
+    else
+        ret = 0;
+
+    return ret;
+clean:
+    if (outitem)
+        rkmpp_release_mppframe_item(outitem, NULL);
+    else if (item)
+        rkmpp_release_mppframe_item(item, NULL);
+    if (desc)
+        av_free(desc);
+    return ret;
+}
+
+static int rkmpp_convert_frame(AVCodecContext *avctx, AVFrame *frame){
+   // do conversion
+    RKMPPCodecContext *rk_context = avctx->priv_data;
+    MppFrameItem* item = rk_context->mpp_decode_fifo.first;
+    MppFrameItem* item_orig = item;
+    int ret;
+
+    if(!item){
+        av_log(avctx, AV_LOG_TRACE, "Waiting to receive input frame.\n");
+        return AVERROR(EAGAIN);
+    }
+
+    if(!rkmpp_fifo_isfull(&rk_context->mpp_rga_fifo)){
+        av_log(avctx, AV_LOG_TRACE, "RGA Fifo full\n");
+        return AVERROR(EAGAIN);
+    }
+
+    // poll rga status
+    ret = rkmpp_rga_wait(item->rga, MPP_TIMEOUT_NON_BLOCK, &item->timestamp);
+    if(ret == AVERROR_UNKNOWN){
+        av_log(avctx, AV_LOG_ERROR, "RGA timed out for in fifo frame %ld. Dropped\n", item->framenum);
+        goto clean;
+    } else if (ret < 0)
+        return AVERROR(EAGAIN);
+
+    av_log(avctx, AV_LOG_DEBUG, "Received frame %ld for conversion.\n", item->framenum);
+
+    if(rk_context->codec_flow == SWAPANDCONVERT){
+        item = item->rga;
+        item->framenum = item_orig->framenum;
+        item->old_timestamp = item_orig->timestamp;
+        item->format = &rk_context->swapformat;
+        rkmpp_frame_timestamp(item);
+        strcpy(item->type , "swap");
+    }
+
+    item->rga = av_mallocz(sizeof(MppFrameItem));
+    item->rga->format = &rk_context->outformat;
+    item->rga->mppframe = rkmpp_create_mpp_frame(item->rga->format->planedata.width, item->rga->format->planedata.height,
+            item->rga->format, rk_context->buffer_group_rga, NULL, NULL);
+    strcpy(item->rga->type , "output");
+
+    if(!item->rga->mppframe){
+        av_log(avctx, AV_LOG_WARNING, "Can not get out frame\n");
+        goto cleanrga;
+    }
+
+    rkmpp_transfer_mpp_props(item->mppframe, item->rga->mppframe);
+    if(rk_context->libyuv){
+        item->rga->rgafence = 0;
+        ret = 0;
+        rkmpp_semi_to_planar_soft(item->mppframe, item->format, item->rga->mppframe, item->rga->format);
+    } else {
+        ret = rkmpp_rga_convert_mpp_mpp(avctx, item->mppframe, item->format, item->rga->mppframe, item->rga->format,
+                    &item->rga->rgafence);
+        if(ret)
+            goto cleanrga;
+    }
+
+    rkmpp_fifo_pop(&rk_context->mpp_decode_fifo);
+    if(rk_context->codec_flow == SWAPANDCONVERT){
+        item_orig->rga = NULL;
+        rkmpp_release_mppframe_item(item_orig, NULL);
+    }
+    rkmpp_fifo_push(&rk_context->mpp_rga_fifo, item);
+    return ret;
+clean:
+    rkmpp_fifo_pop(&rk_context->mpp_decode_fifo);
+    if (item)
+        rkmpp_release_mppframe_item(item, NULL);
+    return ret;
+cleanrga:
+    if(item->rga->mppframe)
+        mpp_frame_deinit(&item->rga->mppframe);
+    av_free(item->rga);
+    item->rga = NULL;
+    return AVERROR(EAGAIN);
+}
+
+static int rkmpp_decode_frame(AVCodecContext *avctx, int timeout){
+    RKMPPCodecContext *rk_context = avctx->priv_data;
     MppFrame mppframe = NULL;
-    MppBuffer buffer = NULL;
-    rkformat format;
-    int ret, latency;
-    int mpp_width, mpp_height, mpp_mode;
-    enum AVColorRange mpp_color_range;
-    enum AVColorPrimaries mpp_color_primaries;
-    enum AVColorTransferCharacteristic mpp_color_trc;
-    enum AVColorSpace mpp_color_space;
-    int64_t mpp_pts;
+    MppFrameItem* item = NULL;
+    MppBuffer mppbuffer = NULL;
 
-    codec->mpi->control(codec->ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&timeout);
+    int ret=0;
 
-    ret = codec->mpi->decode_get_frame(codec->ctx, &mppframe);
+    if(rk_context->eof)
+        return AVERROR(EAGAIN);
+
+    if(!rkmpp_fifo_isfull(&rk_context->mpp_decode_fifo) ||
+            (rk_context->buffer_group_swap && !mpp_buffer_group_unused(rk_context->buffer_group_swap))){
+        av_log(avctx, AV_LOG_TRACE, "Decode Fifo full\n");
+        return AVERROR(EAGAIN);
+    }
+
+    rk_context->mpi->control(rk_context->ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&timeout);
+    ret = rk_context->mpi->decode_get_frame(rk_context->ctx, &mppframe);
+
     if (ret != MPP_OK && ret != MPP_ERR_TIMEOUT) {
         av_log(avctx, AV_LOG_ERROR, "Failed to get frame (code = %d)\n", ret);
         return AVERROR_UNKNOWN;
     }
 
     if (!mppframe) {
-        av_log(avctx, AV_LOG_DEBUG, "Timeout getting decoded frame.\n");
+        av_log(avctx, AV_LOG_TRACE, "Timeout getting decoded frame.\n");
         return AVERROR(EAGAIN);
     }
 
-    if (mpp_frame_get_eos(mppframe)) {
-        av_log(avctx, AV_LOG_DEBUG, "Received a EOS frame.\n");
-        ret = AVERROR_EOF;
-        goto clean;
-    }
+    item = av_mallocz(sizeof(MppFrameItem));
+    item->mppframe = mppframe;
+    strcpy(item->type, "input");
 
-    if (mpp_frame_get_discard(mppframe)) {
-        av_log(avctx, AV_LOG_DEBUG, "Received a discard frame.\n");
+    if (mpp_frame_get_eos(item->mppframe)) {
+        av_log(avctx, AV_LOG_VERBOSE, "Received a EOS frame.\n");
+        rk_context->eof = rk_context->frame_num;
         ret = AVERROR(EAGAIN);
         goto clean;
     }
 
-    if (mpp_frame_get_errinfo(mppframe)) {
+    if (mpp_frame_get_discard(item->mppframe)) {
+        av_log(avctx, AV_LOG_VERBOSE, "Received a discard frame.\n");
+        ret = AVERROR(EAGAIN);
+        goto clean;
+    }
+
+    if (mpp_frame_get_errinfo(item->mppframe)) {
         av_log(avctx, AV_LOG_ERROR, "Received a errinfo frame.\n");
         ret = AVERROR_UNKNOWN;
         goto clean;
     }
 
-     mpp_format = mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK;
-
-    if (mpp_frame_get_info_change(mppframe)) {
-        if(codec->hascfg)
-            ret = AVERROR(EAGAIN);
-        else{
-            if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
-                char drmname[4];
-                AVHWFramesContext *hwframes;
-                rkmpp_get_mpp_format(&format, mpp_format);
-                DRMFORMATNAME(drmname, format.drm)
-
-                hwframes = (AVHWFramesContext*)codec->hwframes_ref->data;
-                hwframes->format    = AV_PIX_FMT_DRM_PRIME;
-                hwframes->sw_format = format.av;
-                hwframes->width     = avctx->width;
-                hwframes->height    = avctx->height;
-                ret = av_hwframe_ctx_init(codec->hwframes_ref);
-                // FIXME: handle error
-                av_log(avctx, AV_LOG_INFO, "Decoder is set to DRM Prime with format %s.\n", drmname);
-            } else if (mpp_format == MPP_FMT_YUV420SP_10BIT)
-                av_log(avctx, AV_LOG_WARNING, "10bit NV15 plane will be downgraded to 8bit %s.\n", av_get_pix_fmt_name(avctx->pix_fmt));
-            codec->hascfg = 1;
+    if (mpp_frame_get_info_change(item->mppframe)) {
+        if(rkmpp_config_decoder(avctx, item->mppframe)){
+            ret = AVERROR_UNKNOWN;
+            goto clean;
         }
 
-        av_log(avctx, AV_LOG_INFO, "Decoder noticed an info change\n");
-        codec->mpi->control(codec->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
+        av_log(avctx, AV_LOG_VERBOSE, "Decoder noticed an info change\n");
+        rk_context->mpi->control(rk_context->ctx, MPP_DEC_SET_INFO_CHANGE_READY, NULL);
+        ret = 0;
         goto clean;
     }
 
-    // here we should have a valid frame
-    av_log(avctx, AV_LOG_DEBUG, "Received a frame.\n");
-
     // now setup the frame buffer info
-    buffer = mpp_frame_get_buffer(mppframe);
-    if (!buffer) {
+    mppbuffer = mpp_frame_get_buffer(item->mppframe);
+    if (!mppbuffer) {
         av_log(avctx, AV_LOG_ERROR, "Failed to get the frame buffer, frame is dropped (code = %d)\n", ret);
         ret = AVERROR(EAGAIN);
         goto clean;
     }
 
-    latency = rkmpp_update_latency(avctx, -1);
-    mpp_pts = mpp_frame_get_pts(mppframe);
-    mpp_width = mpp_frame_get_width(mppframe);
-    mpp_height = mpp_frame_get_height(mppframe);
-    mpp_color_range = mpp_frame_get_color_range(mppframe);
-    mpp_color_primaries = mpp_frame_get_color_primaries(mppframe);
-    mpp_color_trc = mpp_frame_get_color_trc(mppframe);
-    mpp_color_space = mpp_frame_get_colorspace(mppframe);
-    mpp_mode = mpp_frame_get_mode(mppframe);
+    // here we should have a valid frame
+    rk_context->frame_num++;
+    item->framenum = rk_context->frame_num;
+    item->format = &rk_context->informat;
+    rkmpp_frame_timestamp(item);
 
-    if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
-        ret = import_mpp_to_drm(avctx, mppframe, frame);
-    } else if (mpp_format == MPP_FMT_YUV420SP_10BIT && avctx->pix_fmt == AV_PIX_FMT_NV12){
-        ret = mpp_nv15_av_nv12(avctx, mppframe, frame);
-    } else if (mpp_format == MPP_FMT_YUV420SP_10BIT && avctx->pix_fmt == AV_PIX_FMT_YUV420P){
-        ret = mpp_nv15_av_yuv420p(avctx, mppframe, frame);
-    } else if (mpp_format == MPP_FMT_YUV420SP && avctx->pix_fmt == AV_PIX_FMT_NV12){
-        ret = mpp_nv12_av_nv12(avctx, mppframe, frame);
-    } else {
-        rkmpp_get_mpp_format(&format, mpp_format);
-        ret = convert_mpp_to_av(avctx, mppframe, frame, format.av, avctx->pix_fmt);
-    }
+    av_log(avctx, AV_LOG_DEBUG, "Received frame %ld for decoding.\n", rk_context->frame_num);
 
-    if(ret < 0){
-        av_log(avctx, AV_LOG_ERROR, "Failed set frame buffer (code = %d)\n", ret);
-        return ret;
-    }
+    // swap the mpp output if needed for HDR
+    if(rk_context->codec_flow == SWAPANDCONVERT){
+        item->rga = av_mallocz(sizeof(MppFrameItem));
+        item->rga->mppframe = rkmpp_create_mpp_frame(rk_context->swapformat.planedata.width,
+                rk_context->swapformat.planedata.height, &rk_context->swapformat,
+                rk_context->buffer_group_swap, NULL, NULL);
+        strcpy(item->rga->type, "swap");
+        if(!item->rga->mppframe){
+            av_log(avctx, AV_LOG_ERROR, "Can not get swap frame buffer\n");
+            ret = AVERROR(EAGAIN);
+            goto clean;
+        }
+       if(rkmpp_rga_convert_mpp_mpp(avctx, item->mppframe, item->format,
+               item->rga->mppframe, &rk_context->swapformat, &item->rga->rgafence)){
+           av_log(avctx, AV_LOG_ERROR, "Can not convert NV15 frame\n");
+           ret = AVERROR(ENOMEM);
+           goto clean;
+       } else {
+           rkmpp_transfer_mpp_props(item->mppframe, item->rga->mppframe);
+           item->rga->format = &rk_context->swapformat;
+           rkmpp_fifo_push(&rk_context->mpp_decode_fifo, item);
+       }
+   } else if (rk_context->codec_flow == CONVERT)
+       rkmpp_fifo_push(&rk_context->mpp_decode_fifo, item);
+   else
+       rkmpp_fifo_push(&rk_context->mpp_rga_fifo, item);
 
-    // setup general frame fields
-    frame->format = avctx->pix_fmt;
-    frame->width = mpp_width;
-    frame->height = mpp_height;
-    frame->color_range = mpp_color_range;
-    frame->color_primaries = mpp_color_primaries;
-    frame->color_trc = mpp_color_trc;
-    frame->colorspace = mpp_color_space;
-    frame->pts = mpp_pts;
-
-    // when mpp can not determine the color space, it returns reserved (0) value
-    // firefox does not understand this and instead expect unspecified (2) values
-    frame->color_primaries = frame->color_primaries == AVCOL_PRI_RESERVED0 ? AVCOL_PRI_UNSPECIFIED : frame->color_primaries;
-    frame->color_trc = frame->color_trc == AVCOL_TRC_RESERVED0 ? AVCOL_TRC_UNSPECIFIED : frame->color_trc;
-    frame->colorspace = frame->colorspace == AVCOL_SPC_RGB ? AVCOL_SPC_UNSPECIFIED: frame->color_trc;
-
-    frame->interlaced_frame = ((mpp_mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_DEINTERLACED);
-    frame->top_field_first  = ((mpp_mode & MPP_FRAME_FLAG_FIELD_ORDER_MASK) == MPP_FRAME_FLAG_TOP_FIRST);
-
-    codec->frames++;
-    rkmpp_update_latency(avctx, latency);
     return 0;
-
 clean:
-    if (mppframe)
-        mpp_frame_deinit(&mppframe);
+    if (item)
+        rkmpp_release_mppframe_item(item, NULL);
     return ret;
 }
 
 static int rkmpp_send_packet(AVCodecContext *avctx, AVPacket *packet)
 {
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppPacket mpkt;
     int64_t pts = packet->pts;
     int ret;
-
+/*
     if(pts == AV_NOPTS_VALUE || pts < 0){
-        if(!codec->ptsstep && avctx->framerate.den && avctx->framerate.num){
+        if(!rk_context->ptsstep && avctx->framerate.den && avctx->framerate.num){
             int64_t x = avctx->pkt_timebase.den * (int64_t)avctx->framerate.den;
             int64_t y = avctx->pkt_timebase.num * (int64_t)avctx->framerate.num;
-            codec->ptsstep = x / y;
+            rk_context->ptsstep = x / y;
         }
-        if(codec->ptsstep && (packet->dts == AV_NOPTS_VALUE || packet->dts < 0)){
-            pts = codec->pts;
-            codec->pts += codec->ptsstep;
+        if(rk_context->ptsstep && (packet->dts == AV_NOPTS_VALUE || packet->dts < 0)){
+            pts = rk_context->pts;
+            rk_context->pts += rk_context->ptsstep;
         } else {
-            codec->pts = packet->dts;
+            rk_context->pts = packet->dts;
             pts = packet->dts;
         }
     }
-
+*/
     ret = mpp_packet_init(&mpkt, packet->data, packet->size);
     if (ret != MPP_OK) {
         av_log(avctx, AV_LOG_ERROR, "Failed to init MPP packet (code = %d)\n", ret);
@@ -237,11 +715,11 @@ static int rkmpp_send_packet(AVCodecContext *avctx, AVPacket *packet)
 
     mpp_packet_set_pts(mpkt, pts);
 
-    ret = codec->mpi->decode_put_packet(codec->ctx, mpkt);
+    ret = rk_context->mpi->decode_put_packet(rk_context->ctx, mpkt);
     mpp_packet_deinit(&mpkt);
 
     if (ret != MPP_OK) {
-        av_log(avctx, AV_LOG_TRACE, "Decoder buffer full\n");
+        av_log(avctx, AV_LOG_TRACE, "Decoder packet buffer full\n");
         return AVERROR(EAGAIN);
     }
 
@@ -252,7 +730,6 @@ static int rkmpp_send_packet(AVCodecContext *avctx, AVPacket *packet)
 static int rkmpp_send_eos(AVCodecContext *avctx)
 {
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppPacket mpkt;
     int ret;
 
@@ -265,7 +742,7 @@ static int rkmpp_send_eos(AVCodecContext *avctx)
     mpp_packet_set_eos(mpkt);
 
     do {
-        ret = codec->mpi->decode_put_packet(codec->ctx, mpkt);
+        ret = rk_context->mpi->decode_put_packet(rk_context->ctx, mpkt);
     } while (ret != MPP_OK);
     mpp_packet_deinit(&mpkt);
 
@@ -276,52 +753,73 @@ int rkmpp_receive_frame(AVCodecContext *avctx, AVFrame *frame)
 {
     AVCodecInternal *avci = avctx->internal;
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    AVPacket *packet = &codec->lastpacket;
-    int ret_send, ret_get;
+    AVPacket *packet = &rk_context->lastpacket;
+    int ret_get_packet=0, ret_send_packet=0, ret_decode=0, ret_convert=0, ret_get_frame=0;
 
-    // get packet if not already available from previous iteration
     if (!avci->draining){
         if(!packet->size){
-            switch(ff_decode_get_packet(avctx, packet)){
-                case AVERROR_EOF:
-                    av_log(avctx, AV_LOG_DEBUG, "Decoder Draining.\n");
-                    return rkmpp_send_eos(avctx);
-                case AVERROR(EAGAIN):
-                    av_log(avctx, AV_LOG_TRACE, "Decoder Can't get packet retrying.\n");
-                    return AVERROR(EAGAIN);
-                }
+            ret_get_packet = ff_decode_get_packet(avctx, packet);
+            if(ret_get_packet == AVERROR_EOF){
+                av_log(avctx, AV_LOG_VERBOSE, "Decoder Draining.\n");
+                rkmpp_send_eos(avctx);
+            } else if (ret_get_packet == AVERROR(EAGAIN))
+                 av_log(avctx, AV_LOG_TRACE, "Decoder Can't get packet retrying.\n");
         }
-
-sendpacket:
-        // there is definitely a packet to send to decoder here
-        ret_send = rkmpp_send_packet(avctx, packet);
-        if (ret_send == 0){
-            // send successful, continue until decoder input buffer is full
-            av_packet_unref(packet);
-            return AVERROR(EAGAIN);
-        } else if (ret_send < 0 && ret_send != AVERROR(EAGAIN)) {
-            // something went wrong, raise error
-            av_log(avctx, AV_LOG_ERROR, "Decoder Failed to send data (code = %d)\n", ret_send);
-            return ret_send;
+send_loop:
+        if(packet->size){
+            ret_send_packet = rkmpp_send_packet(avctx, packet);
+            if (ret_send_packet == 0){
+                // send successful, continue until decoder input buffer is full
+                av_packet_unref(packet);
+                return AVERROR(EAGAIN);
+            } else if (ret_send_packet < 0 && ret_send_packet != AVERROR(EAGAIN)) {
+                // something went wrong, raise error
+                av_log(avctx, AV_LOG_ERROR, "Decoder Failed to send data (code = %d)\n", ret_send_packet);
+                return ret_send_packet;
+            }
         }
     }
 
-    // were here only when draining and buffer is full
-    ret_get = rkmpp_get_frame(avctx, frame, MPP_TIMEOUT_BLOCK);
+receive_loop:
+    ret_decode = rkmpp_decode_frame(avctx, MPP_TIMEOUT_NON_BLOCK);
+    ret_convert = rkmpp_convert_frame(avctx, frame);
+    ret_get_frame = rkmpp_get_frame(avctx, frame);
 
-    if (ret_get == AVERROR_EOF){
-        av_log(avctx, AV_LOG_DEBUG, "Decoder is at EOS.\n");
-    // this is not likely but lets handle it in case synchronization issues of mpp
-    } else if (ret_get == AVERROR(EAGAIN) && ret_send == AVERROR(EAGAIN))
-        goto sendpacket;
-    // only for logging
-    else if (ret_get < 0 && ret_get != AVERROR(EAGAIN)) // FIXME
-        av_log(avctx, AV_LOG_ERROR, "Decoder Failed to get frame (code = %d)\n", ret_get);
+    if(!ret_get_frame)
+        return ret_get_frame;
+    else if (ret_get_frame == AVERROR_EOF){
+        av_log(avctx, AV_LOG_VERBOSE, "Decoder is at EOS.\n");
+        return AVERROR_EOF;
+    }
 
-   return ret_get;
+    if (ret_decode != AVERROR(EAGAIN) && ret_decode < 0){
+        av_log(avctx, AV_LOG_ERROR, "Decoder Failed to decode frame (code = %d)\n", ret_decode);
+        return ret_decode;
+    }
+
+    if (ret_convert != AVERROR(EAGAIN) && ret_convert < 0){
+        av_log(avctx, AV_LOG_ERROR, "Decoder Failed to decode frame (code = %d)\n", ret_convert);
+        return ret_convert;
+    }
+
+    if(ret_get_frame != AVERROR(EAGAIN) && ret_get_frame < 0){
+        av_log(avctx, AV_LOG_TRACE, "Decoder Failed to getframe (code = %d)\n", ret_get_frame);
+        return ret_get_frame;
+    }
+
+   if(ret_send_packet == AVERROR(EAGAIN) && ret_get_frame == AVERROR(EAGAIN))
+       goto send_loop;
+   else if (rk_context->mpp_rga_fifo.used)
+       goto receive_loop;
+   else if(avci->draining){
+       // some players (ie: kodi) are tricky, keep this here for sanity
+       if(!rk_context->mpp_decode_fifo.used && !rk_context->mpp_rga_fifo.used)
+           return AVERROR_EOF;
+       goto receive_loop;
+   }
+
+   return AVERROR(EAGAIN);
 }
-
 
 RKMPP_DEC(h263, AV_CODEC_ID_H263, NULL)
 RKMPP_DEC(h264, AV_CODEC_ID_H264, "h264_mp4toannexb")
@@ -332,4 +830,3 @@ RKMPP_DEC(vp9, AV_CODEC_ID_VP9, NULL)
 RKMPP_DEC(mpeg1, AV_CODEC_ID_MPEG1VIDEO, NULL)
 RKMPP_DEC(mpeg2, AV_CODEC_ID_MPEG2VIDEO, NULL)
 RKMPP_DEC(mpeg4,AV_CODEC_ID_MPEG4, "mpeg4_unpack_bframes")
-

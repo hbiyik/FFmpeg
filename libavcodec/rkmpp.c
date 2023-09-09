@@ -18,44 +18,16 @@
  * License along with FFmpeg; if not, write to the Free Software
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
-#include <fcntl.h>
+#ifdef _POSIX_C_SOURCE
+#undef _POSIX_C_SOURCE
+#endif
+#define _POSIX_C_SOURCE 200809L /* for O_CLOEXEC */
+
 #include <time.h>
 #include "rkmpp.h"
-
-static rkformat rkformats[13] = {
-        { .av = AV_PIX_FMT_YUV420P, .mpp = MPP_FMT_YUV420P,        .drm = DRM_FORMAT_YUV420,   .rga = RK_FORMAT_YCbCr_420_P},
-        { .av = AV_PIX_FMT_YUV422P, .mpp = MPP_FMT_YUV422P,        .drm = DRM_FORMAT_YUV422,   .rga = RK_FORMAT_YCbCr_422_P},
-        { .av = AV_PIX_FMT_NV12,    .mpp = MPP_FMT_YUV420SP,       .drm = DRM_FORMAT_NV12,     .rga = RK_FORMAT_YCbCr_420_SP},
-        { .av = AV_PIX_FMT_NV16,    .mpp = MPP_FMT_YUV422SP,       .drm = DRM_FORMAT_NV16,     .rga = RK_FORMAT_YCbCr_422_SP},
-        { .av = AV_PIX_FMT_NV15,    .mpp = MPP_FMT_YUV420SP_10BIT, .drm = DRM_FORMAT_NV15,     .rga = RK_FORMAT_YCbCr_420_SP_10B},
-        { .av = AV_PIX_FMT_BGR24,   .mpp = MPP_FMT_BGR888,         .drm = DRM_FORMAT_BGR888,   .rga = RK_FORMAT_BGR_888},
-        { .av = AV_PIX_FMT_BGR0,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_XRGB8888, .rga = RK_FORMAT_BGRX_8888},
-        { .av = AV_PIX_FMT_BGRA,    .mpp = MPP_FMT_BGRA8888,       .drm = DRM_FORMAT_ARGB8888, .rga = RK_FORMAT_BGRA_8888},
-        { .av = AV_PIX_FMT_BGR565,  .mpp = MPP_FMT_BGR565,         .drm = DRM_FORMAT_BGR565,   .rga = RK_FORMAT_BGR_565},
-        { .av = AV_PIX_FMT_YUYV422, .mpp = MPP_FMT_YUV422_YUYV,    .drm = DRM_FORMAT_YUYV,     .rga = RK_FORMAT_YUYV_422},
-        { .av = AV_PIX_FMT_UYVY422, .mpp = MPP_FMT_YUV422_UYVY,    .drm = DRM_FORMAT_UYVY,     .rga = RK_FORMAT_UYVY_422},
-        { .av = AV_PIX_FMT_NV24,    .mpp = MPP_FMT_YUV444SP,       .drm = DRM_FORMAT_NV24,     .rga = RK_FORMAT_UNKNOWN},
-        { .av = AV_PIX_FMT_YUV444P, .mpp = MPP_FMT_YUV444P,        .drm = DRM_FORMAT_YUV444,   .rga = RK_FORMAT_UNKNOWN},
-};
-
-#define GETFORMAT(NAME, TYPE)\
-int rkmpp_get_##NAME##_format(rkformat *format, TYPE informat){ \
-    for(int i=0; i < 13; i++){ \
-        if(rkformats[i].NAME == informat){ \
-            format->av = rkformats[i].av;\
-            format->mpp = rkformats[i].mpp;\
-            format->drm = rkformats[i].drm;\
-            format->rga = rkformats[i].rga;\
-            return 0;\
-        }\
-    }\
-    return -1;\
-}
-
-GETFORMAT(drm, uint32_t)
-GETFORMAT(mpp, MppFrameFormat)
-GETFORMAT(rga, enum _Rga_SURF_FORMAT)
-GETFORMAT(av, enum AVPixelFormat)
+#include <sys/mman.h>
+#include <linux/dma-heap.h>
+#include <fcntl.h>
 
 MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx)
 {
@@ -76,66 +48,54 @@ MppCodingType rkmpp_get_codingtype(AVCodecContext *avctx)
 int rkmpp_close_codec(AVCodecContext *avctx)
 {
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
 
-    av_packet_unref(&codec->lastpacket);
-    av_frame_unref(&codec->lastframe);
+    av_log(avctx, AV_LOG_VERBOSE, "Closing Codec.\n");
+    rkmpp_flush(avctx);
 
-    av_buffer_unref(&rk_context->codec_ref);
+    if (rk_context->buffer_group){
+        mpp_buffer_group_clear(rk_context->buffer_group);
+        mpp_buffer_group_put(rk_context->buffer_group);
+        rk_context->buffer_group = NULL;
+    }
+
+    if (rk_context->buffer_group_swap){
+        mpp_buffer_group_clear(rk_context->buffer_group_swap);
+        mpp_buffer_group_put(rk_context->buffer_group_swap);
+        rk_context->buffer_group_swap = NULL;
+    }
+
+    if (rk_context->buffer_group_rga){
+        mpp_buffer_group_clear(rk_context->buffer_group_rga);
+        mpp_buffer_group_put(rk_context->buffer_group_rga);
+        rk_context->buffer_group_rga = NULL;
+    }
+
+    if(rk_context->dma_fd > 0)
+        close(rk_context->dma_fd);
+
+    if (rk_context->mpi) {
+        rk_context->mpi->reset(rk_context->ctx);
+        mpp_destroy(rk_context->ctx);
+        rk_context->ctx = NULL;
+    }
+
+    if(rk_context->hwframes_ref)
+        av_buffer_unref(&rk_context->hwframes_ref);
+    if(rk_context->hwdevice_ref)
+        av_buffer_unref(&rk_context->hwdevice_ref);
+
+    av_packet_unref(&rk_context->lastpacket);
+
     return 0;
-}
-
-void rkmpp_release_codec(void *opaque, uint8_t *data)
-{
-    RKMPPCodec *codec = (RKMPPCodec *)data;
-
-    if (codec->mpi) {
-        codec->mpi->reset(codec->ctx);
-        mpp_destroy(codec->ctx);
-        codec->ctx = NULL;
-    }
-
-    if (codec->buffer_group) {
-        mpp_buffer_group_put(codec->buffer_group);
-        codec->buffer_group = NULL;
-    }
-
-    if(codec->hwframes_ref)
-        av_buffer_unref(&codec->hwframes_ref);
-    if(codec->hwdevice_ref)
-        av_buffer_unref(&codec->hwdevice_ref);
-
-    av_free(codec);
 }
 
 int rkmpp_init_codec(AVCodecContext *avctx)
 {
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = NULL;
     MppCodingType codectype = MPP_VIDEO_CodingUnused;
-    char *env;
     int ret;
 
-    // create a codec and a ref to it
-    codec = av_mallocz(sizeof(RKMPPCodec));
-    if (!codec) {
-        ret = AVERROR(ENOMEM);
-        goto fail;
-    }
-
-    rk_context->codec_ref = av_buffer_create((uint8_t *)codec, sizeof(*codec), rkmpp_release_codec,
-                                               NULL, AV_BUFFER_FLAG_READONLY);
-    if (!rk_context->codec_ref) {
-        av_free(codec);
-        ret = AVERROR(ENOMEM);
-        goto fail;
-    }
-
-    env = getenv("FFMPEG_RKMPP_LOG_FPS");
-    if (env != NULL)
-        codec->print_fps = !!atoi(env);
-
-    av_log(avctx, AV_LOG_DEBUG, "Initializing RKMPP Codec.\n");
+    av_log(avctx, AV_LOG_VERBOSE, "Initializing RKMPP Codec.\n");
 
     codectype = rkmpp_get_codingtype(avctx);
     if (codectype == MPP_VIDEO_CodingUnused) {
@@ -144,7 +104,7 @@ int rkmpp_init_codec(AVCodecContext *avctx)
         goto fail;
     }
 
-    ret = mpp_check_support_format(codec->mppctxtype, codectype);
+    ret = mpp_check_support_format(rk_context->mppctxtype, codectype);
     if (ret != MPP_OK) {
         av_log(avctx, AV_LOG_ERROR, "Codec type (%d) unsupported by MPP\n", avctx->codec_id);
         ret = AVERROR_UNKNOWN;
@@ -152,65 +112,45 @@ int rkmpp_init_codec(AVCodecContext *avctx)
     }
 
     // Create the MPP context
-    ret = mpp_create(&codec->ctx, &codec->mpi);
+    ret = mpp_create(&rk_context->ctx, &rk_context->mpi);
     if (ret != MPP_OK) {
         av_log(avctx, AV_LOG_ERROR, "Failed to create MPP context (code = %d).\n", ret);
         ret = AVERROR_UNKNOWN;
         goto fail;
     }
 
+    rk_context->dma_fd = open("/dev/dma_heap/system-dma32", O_RDWR);
+    if (rk_context->dma_fd < 0) {
+       av_log(avctx, AV_LOG_ERROR, "Failed to open system-dma32 heap\n");
+       ret = AVERROR_UNKNOWN;
+       goto fail;
+    }
+
     if(ffcodec(avctx->codec)->cb_type == FF_CODEC_CB_TYPE_RECEIVE_FRAME){
-        codec->init_callback = rkmpp_init_decoder;
-        codec->mppctxtype = MPP_CTX_DEC;
+        rk_context->init_callback = rkmpp_init_decoder;
+        rk_context->mppctxtype = MPP_CTX_DEC;
 
         ret = 1;
-        codec->mpi->control(codec->ctx, MPP_DEC_SET_PARSER_FAST_MODE, &ret);
-
-        avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
-
-        // override the the pixfmt according env variable
-        env = getenv("FFMPEG_RKMPP_PIXFMT");
-        if(env != NULL){
-            if(!strcmp(env, "YUV420P"))
-                avctx->pix_fmt = AV_PIX_FMT_YUV420P;
-            else if (!strcmp(env, "NV12"))
-                avctx->pix_fmt = AV_PIX_FMT_NV12;
-            else if(!strcmp(env, "DRMPRIME"))
-                avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
-        }
+        rk_context->mpi->control(rk_context->ctx, MPP_DEC_SET_PARSER_FAST_MODE, &ret);
     } else if ((ffcodec(avctx->codec)->cb_type == FF_CODEC_CB_TYPE_ENCODE)){
-        codec->mppctxtype = MPP_CTX_ENC;
-        codec->init_callback = rkmpp_init_encoder;
+        rk_context->mppctxtype = MPP_CTX_ENC;
+        rk_context->init_callback = rkmpp_init_encoder;
     } else {
         ret = AVERROR(ENOMEM);
-        av_log(avctx, AV_LOG_DEBUG, "RKMPP Codec can not determine if the mode is decoder or encoder\n");
+        av_log(avctx, AV_LOG_ERROR, "RKMPP Codec can not determine if the mode is decoder or encoder\n");
         goto fail;
     }
 
-    av_log(avctx, AV_LOG_INFO, "Picture format is %s.\n", av_get_pix_fmt_name(avctx->pix_fmt));
-
     // initialize mpp
-    ret = mpp_init(codec->ctx, codec->mppctxtype, codectype);
+    ret = mpp_init(rk_context->ctx, rk_context->mppctxtype, codectype);
     if (ret != MPP_OK) {
         av_log(avctx, AV_LOG_ERROR, "Failed to initialize MPP context (code = %d).\n", ret);
         ret = AVERROR_UNKNOWN;
         goto fail;
     }
 
-    env = getenv("FFMPEG_RKMPP_NORGA");
-    if(env != NULL){
-        codec->norga = 1;
-        av_log(avctx, AV_LOG_INFO, "Bypassing RGA and using libyuv soft conversion\n");
-    }
+    ret = rk_context->init_callback(avctx);
 
-    ret = mpp_buffer_group_get_internal(&codec->buffer_group, MPP_BUFFER_TYPE_ION | MPP_BUFFER_FLAGS_DMA32);
-    if (ret) {
-       av_log(avctx, AV_LOG_ERROR, "Failed to get buffer group (code = %d)\n", ret);
-       ret = AVERROR_UNKNOWN;
-       goto fail;
-    }
-
-    ret = codec->init_callback(avctx);
     if(ret){
         av_log(avctx, AV_LOG_ERROR, "Failed to init Codec (code = %d).\n", ret);
         goto fail;
@@ -227,46 +167,126 @@ fail:
 void rkmpp_flush(AVCodecContext *avctx)
 {
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
+    av_log(avctx, AV_LOG_VERBOSE, "Flush.\n");
 
-    av_log(avctx, AV_LOG_DEBUG, "Flush.\n");
+    av_packet_unref(&rk_context->lastpacket);
 
-    codec->mpi->reset(codec->ctx);
-    codec->last_frame_time = codec->frames = codec->hascfg = 0;
+    rk_context->mpi->reset(rk_context->ctx);
 
-    av_packet_unref(&codec->lastpacket);
-    av_frame_unref(&codec->lastframe);
+    while (rk_context->mpp_decode_fifo.first){
+        MppFrameItem* first = rk_context->mpp_decode_fifo.first;
+        rkmpp_fifo_pop(&rk_context->mpp_decode_fifo);
+        rkmpp_rga_wait(first, MPP_TIMEOUT_BLOCK, NULL);
+        rkmpp_release_mppframe_item(first, NULL);
+    }
+
+    while (rk_context->mpp_rga_fifo.first){
+        MppFrameItem* first = rk_context->mpp_rga_fifo.first;
+        rkmpp_fifo_pop(&rk_context->mpp_rga_fifo);
+        rkmpp_rga_wait(first, MPP_TIMEOUT_BLOCK, NULL);
+        rkmpp_release_mppframe_item(first, NULL);
+    }
+
+    rk_context->hascfg = rk_context->frame_num = rk_context->eof = 0;
 }
 
-uint64_t rkmpp_update_latency(AVCodecContext *avctx, int latency)
+MPP_RET rkmpp_buffer_alloc(AVCodecContext *avctx, size_t size, MppBufferGroup *buffer_group, int count)
 {
+    MPP_RET ret=MPP_SUCCESS;
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    struct timespec tv;
-    uint64_t curr_time;
-    float fps = 0.0f;
 
-    if (!codec->print_fps)
-        return 0;
-
-    clock_gettime(CLOCK_MONOTONIC, &tv);
-    curr_time = tv.tv_sec * 10e5 + tv.tv_nsec / 10e2;
-    if (latency == -1){
-        latency = codec->last_frame_time ? curr_time - codec->last_frame_time : 0;
-        codec->last_frame_time = curr_time;
-        codec->latencies[codec->frames % RKMPP_FPS_FRAME_MACD] = latency;
-        return latency;
-    } else if (latency == 0 || codec->frames < RKMPP_FPS_FRAME_MACD) {
-        fps = -1.0f;
-    } else {
-       for(int i = 0; i < RKMPP_FPS_FRAME_MACD; i++) {
-          fps += codec->latencies[i];
-       }
-        fps = RKMPP_FPS_FRAME_MACD * 1000000.0f / fps;
+    if (*buffer_group) {
+        if ((ret = mpp_buffer_group_clear(*buffer_group)) != MPP_OK) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to clear external buffer group: %d\n", ret);
+            return ret;
+        }
     }
-    av_log(avctx, AV_LOG_INFO,
-           "[FFMPEG RKMPP] FPS(MACD%d): %6.1f || Frames: %" PRIu64 " || Latency: %d us || Buffer Delay %" PRIu64 "us\n",
-           RKMPP_FPS_FRAME_MACD, fps, codec->frames, latency, (uint64_t)(curr_time - codec->last_frame_time));
 
+    ret = mpp_buffer_group_get_external(buffer_group, MPP_BUFFER_TYPE_DMA_HEAP);
+    if (ret) {
+       av_log(avctx, AV_LOG_ERROR, "Failed to get buffer group (code = %d)\n", ret);
+       return ret;
+    }
+
+    for (int i=0; i < count; i++){
+        void *ptr;
+        struct dma_heap_allocation_data alloc = {
+               .len = size,
+               .fd_flags = O_CLOEXEC | O_RDWR,
+           };
+
+        MppBufferInfo buf_info = {
+            .index = i,
+            .type  = MPP_BUFFER_TYPE_DMA_HEAP,
+            .size  = alloc.len,
+        };
+
+        if (ioctl(rk_context->dma_fd, DMA_HEAP_IOCTL_ALLOC, &alloc) == -1)
+            return MPP_ERR_MALLOC;
+
+        buf_info.fd = alloc.fd;
+        buf_info.ptr = mmap(NULL, alloc.len, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.fd, 0);
+        ptr = buf_info.ptr;
+        ret = mpp_buffer_commit(*buffer_group, &buf_info);
+        if (ret) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to commit external buffer group: %d\n", ret);
+            return ret;
+        }
+        if(alloc.fd > 0){
+            // FDs are duplicated in mpp buffer pool. to prevent leaks, close original map
+            munmap(ptr, alloc.len);
+            close(alloc.fd);
+        }
+    }
+
+    av_log(avctx, AV_LOG_VERBOSE, "Allocated %d buffer(s) of %ld kB as total %ld MB\n", count, (size) >> 10, (count*size) >> 20);
+
+    return MPP_SUCCESS;
+}
+
+int rkmpp_fifo_isfull(MppFrameFifo* fifo){
+    if(fifo->limit != -1 && fifo->used == fifo->limit)
+        return 0;
+    return -1;
+}
+
+int rkmpp_fifo_isempty(MppFrameFifo* fifo){
+    if(!fifo->used)
+        return 0;
+    return -1;
+}
+
+int rkmpp_fifo_push(MppFrameFifo* fifo, MppFrameItem* item){
+    if(!rkmpp_fifo_isfull(fifo))
+        return AVERROR(EAGAIN);
+
+    item->nextitem = NULL;
+    if(fifo->first == NULL)
+        fifo->first = item;
+    else if (fifo->last == NULL){
+        fifo->last = item;
+        fifo->first->nextitem = item;
+    } else {
+        fifo->last->nextitem = item;
+        fifo->last = item;
+    }
+
+    fifo->used++;
+    return 0;
+}
+
+int rkmpp_fifo_pop(MppFrameFifo* fifo){
+    if(!rkmpp_fifo_isempty(fifo))
+        return AVERROR(EAGAIN);
+
+    if(fifo->first->nextitem){
+        fifo->first = fifo->first->nextitem;
+    } else
+        fifo->first = NULL;
+
+    if(fifo->first == fifo->last)
+        fifo->last = NULL;
+
+    fifo->used--;
     return 0;
 }

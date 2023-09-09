@@ -19,65 +19,116 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 #include "rkmpp.h"
-#include "rkplane.h"
 
-static int rkmpp_config_withframe(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
+static int prepare_rga(AVCodecContext *avctx, rkformat* informat){
+    MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    MppEncCfg cfg = codec->enccfg;
 
-    if(codec->hascfg == 0){
-        rkformat format;
-
-        int ret;
-        if(frame->time_base.num && frame->time_base.den){
-            avctx->time_base.num = frame->time_base.num;
-            avctx->time_base.den = frame->time_base.den;
-        } else {
-            avctx->time_base.num = avctx->framerate.den;
-            avctx->time_base.den = avctx->framerate.num;
-        }
-
-        mpp_enc_cfg_set_s32(cfg, "prep:width", mpp_frame_get_width(mppframe));
-        mpp_enc_cfg_set_s32(cfg, "prep:height", mpp_frame_get_height(mppframe));
-        mpp_enc_cfg_set_s32(cfg, "prep:hor_stride", mpp_frame_get_hor_stride(mppframe));
-        mpp_enc_cfg_set_s32(cfg, "prep:ver_stride", mpp_frame_get_ver_stride(mppframe));
-        mpp_enc_cfg_set_s32(cfg, "prep:format", mpp_frame_get_fmt(mppframe) & MPP_FRAME_FMT_MASK);
-        ret = codec->mpi->control(codec->ctx, MPP_ENC_SET_CFG, cfg);
-        if (ret != MPP_OK) {
-            av_log(avctx, AV_LOG_ERROR, "Failed to config with frame (code = %d).\n", ret);
-            return AVERROR_UNKNOWN;
-        }
-        codec->hascfg = 1;
-        rkmpp_get_mpp_format(&format, mpp_frame_get_fmt(mppframe));
-        av_log(avctx, AV_LOG_INFO, "Reconfigured with w=%d, h=%d, format=%s.\n", mpp_frame_get_width(mppframe),
-                mpp_frame_get_height(mppframe), av_get_pix_fmt_name(format.av));
-        return 0;
+    //https://github.com/rockchip-linux/mpp/issues/417
+    //Encoder does not support 422 planes for vp8, and NV15 for all, but we can do this with rga
+    if(informat->av == AV_PIX_FMT_NV15 ||
+            (coding_type == MPP_VIDEO_CodingVP8 && (informat->av == AV_PIX_FMT_NV16 || informat->av == AV_PIX_FMT_YUV422P))){
+        rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_BGR0,
+                informat->planedata.width, informat->planedata.height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+        if(!rk_context->postrga_width)
+            rk_context->postrga_width = informat->planedata.width;
+        if(!rk_context->postrga_height)
+            rk_context->postrga_height = informat->planedata.height;
     }
+
+    if(rk_context->postrga_width || rk_context->postrga_height){
+        if(informat->av == AV_PIX_FMT_NV24 || informat->av == AV_PIX_FMT_YUV444P){
+            av_log(avctx, AV_LOG_ERROR, "Scaling is not supported for format %s.\n",
+                    av_get_pix_fmt_name(informat->av));
+            return -1;
+        }
+
+        if(rk_context->postrga_width < RKMPP_RGA_MIN_SIZE ||
+                rk_context->postrga_width > RKMPP_RGA_MAX_SIZE ||
+                rk_context->postrga_height < RKMPP_RGA_MIN_SIZE ||
+                rk_context->postrga_height > RKMPP_RGA_MAX_SIZE){
+            av_log(avctx, AV_LOG_ERROR, "Scaling is not in between %d and %d.\n", RKMPP_RGA_MIN_SIZE, RKMPP_RGA_MAX_SIZE);
+            return -2;
+        }
+        avctx->width = rk_context->postrga_width;
+        avctx->height = rk_context->postrga_height;
+        if(rk_context->outformat.numplanes == 0) // if not previously set by the VP8 RGBA hack
+            rkmpp_get_av_format(&rk_context->outformat, informat->av,
+                    rk_context->postrga_width, rk_context->postrga_height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+    }
+
     return 0;
 }
 
-static int rkmpp_config(AVCodecContext *avctx){
+static int rkmpp_config_decoder(AVCodecContext *avctx, AVFrame* frame){
+    MppFrame mppframe = NULL;
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-    MppEncCfg cfg = codec->enccfg;
+    rkformat* informat = &rk_context->informat;
+    MppEncCfg cfg = rk_context->enccfg;
     RK_U32 rc_mode, split_mode, split_arg, split_out, fps_num, fps_den;
     MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     MppEncHeaderMode header_mode;
     MppEncSeiMode sei_mode;
     int ret, max_bps, min_bps, qmin, qmax;
 
+    if(rk_context->hascfg)
+        return 0;
+
+    if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
+        int size, hstride, vstride;
+        AVDRMFrameDescriptor *desc = (AVDRMFrameDescriptor*) frame->data[0];
+        AVDRMLayerDescriptor *layer = &desc->layers[0];
+        size = desc->objects[0].size;
+        hstride = layer->planes[0].pitch;
+        if(rk_context->informat.numplanes == 1)
+            vstride = size / hstride;
+        else
+            vstride = layer->planes[1].offset / hstride;
+        rkmpp_get_drm_format(&rk_context->informat, layer->format,
+                avctx->width, avctx->height, 0, hstride, vstride, 0, size, 0);
+    } else {
+        mppframe = rkmpp_mppframe_from_av(frame);
+        if(mppframe){
+            rkmpp_get_mpp_format(&rk_context->swapformat, mpp_frame_get_fmt(mppframe),
+                    mpp_frame_get_width(mppframe), mpp_frame_get_height(mppframe), 0,
+                    mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
+                    mpp_frame_get_buf_size(mppframe), 0);
+            informat = &rk_context->swapformat;
+        } else {
+            rkmpp_get_av_format(&rk_context->informat, avctx->pix_fmt,
+                    avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+            if(rkmpp_buffer_alloc(avctx, rk_context->informat.planedata.overshoot,
+                    &rk_context->buffer_group, rk_context->dma_enc_count))
+                return -4;
+        }
+    }
+
+    if(prepare_rga(avctx, informat)){
+        return -3;
+    } else if(rkmpp_buffer_alloc(avctx, rk_context->outformat.planedata.overshoot,
+            &rk_context->buffer_group_rga, rk_context->dma_rga_count))
+        return -2;
+
+    if(rk_context->outformat.numplanes)
+        informat = &rk_context->outformat;
+
     //prep config
-    mpp_enc_cfg_set_s32(cfg, "prep:width", avctx->width);
-    mpp_enc_cfg_set_s32(cfg, "prep:height", avctx->height);
-    mpp_enc_cfg_set_s32(cfg, "prep:hor_stride", FFALIGN(avctx->width, RKMPP_STRIDE_ALIGN));
-    mpp_enc_cfg_set_s32(cfg, "prep:ver_stride", FFALIGN(avctx->height, RKMPP_STRIDE_ALIGN));
-    // later to be reconfigured with the first frame received
-    mpp_enc_cfg_set_s32(cfg, "prep:format", MPP_FMT_YUV420SP);
+    mpp_enc_cfg_set_s32(cfg, "prep:width", informat->planedata.width);
+    mpp_enc_cfg_set_s32(cfg, "prep:height", informat->planedata.height);
+    mpp_enc_cfg_set_s32(cfg, "prep:hor_stride", informat->planedata.hstride);
+    mpp_enc_cfg_set_s32(cfg, "prep:ver_stride", informat->planedata.vstride);
+    mpp_enc_cfg_set_s32(cfg, "prep:format", informat->mpp);
     mpp_enc_cfg_set_s32(cfg, "prep:mirroring", 0);
     mpp_enc_cfg_set_s32(cfg, "prep:rotation", 0);
     mpp_enc_cfg_set_s32(cfg, "prep:flip", 0);
 
+    if(frame->time_base.num && frame->time_base.den){
+        avctx->time_base.num = frame->time_base.num;
+        avctx->time_base.den = frame->time_base.den;
+    } else {
+        avctx->time_base.num = avctx->framerate.den;
+        avctx->time_base.den = avctx->framerate.num;
+    }
     //rc config
     // make sure time base of avctx is synced to input frames
     av_reduce(&fps_num, &fps_den, avctx->time_base.den, avctx->time_base.num, 65535);
@@ -272,14 +323,14 @@ static int rkmpp_config(AVCodecContext *avctx){
          mpp_enc_cfg_set_s32(cfg, "split:out", split_out);
      }
 
-     ret = codec->mpi->control(codec->ctx, MPP_ENC_SET_CFG, cfg);
+     ret = rk_context->mpi->control(rk_context->ctx, MPP_ENC_SET_CFG, cfg);
      if (ret != MPP_OK) {
          av_log(avctx, AV_LOG_ERROR, "Failed to set cfg on MPI (code = %d).\n", ret);
          return AVERROR_UNKNOWN;
      }
 
      sei_mode = MPP_ENC_SEI_MODE_DISABLE;
-     ret = codec->mpi->control(codec->ctx, MPP_ENC_SET_SEI_CFG, &sei_mode);
+     ret = rk_context->mpi->control(rk_context->ctx, MPP_ENC_SET_SEI_CFG, &sei_mode);
      if (ret != MPP_OK) {
          av_log(avctx, AV_LOG_ERROR, "Failed to set sei cfg on MPI (code = %d).\n", ret);
          return AVERROR_UNKNOWN;
@@ -287,72 +338,19 @@ static int rkmpp_config(AVCodecContext *avctx){
 
      header_mode = MPP_ENC_HEADER_MODE_EACH_IDR;
      if (coding_type == MPP_VIDEO_CodingAVC || coding_type == MPP_VIDEO_CodingHEVC) {
-         ret = codec->mpi->control(codec->ctx, MPP_ENC_SET_HEADER_MODE, &header_mode);
+         ret = rk_context->mpi->control(rk_context->ctx, MPP_ENC_SET_HEADER_MODE, &header_mode);
          if (ret) {
              av_log(avctx, AV_LOG_ERROR, "Failed header mode on MPI (code = %d).\n", ret);
              return ret;
          }
      }
+     rk_context->hascfg = 1;
 
-    return 0;
-}
-
-//https://github.com/rockchip-linux/mpp/issues/417
-//Encoder does not support 422 planes, but we can do this with rga
-//FIX-ME: NV12/YUV422P do not have libyuv fallbacks when encoding vp8
-static int check_vp8_planes(AVCodecContext *avctx, enum AVPixelFormat pix_fmt){
-    MppCodingType coding_type = rkmpp_get_codingtype(avctx);
-    RKMPPCodecContext *rk_context = avctx->priv_data;
-
-    if(coding_type == MPP_VIDEO_CodingVP8 &&
-            (pix_fmt == AV_PIX_FMT_NV16 ||
-             pix_fmt == AV_PIX_FMT_YUV422P)){
-        rk_context->postrga_format = AV_PIX_FMT_NV12;
-
-        if (avctx->width < RKMPP_RGA_MIN_SIZE || avctx->width > RKMPP_RGA_MAX_SIZE){
-            av_log(avctx, AV_LOG_ERROR, "Frame width (%d) not in rga scalable range (%d - %d)\n",
-                    avctx->width, RKMPP_RGA_MIN_SIZE, RKMPP_RGA_MAX_SIZE);
-            return -1;
-        } else
-            rk_context->postrga_width = avctx->width;
-
-        if (avctx->height < RKMPP_RGA_MIN_SIZE || avctx->height > RKMPP_RGA_MAX_SIZE){
-            av_log(avctx, AV_LOG_ERROR, "Frame height (%d) not in rga scalable range (%d - %d)\n",
-                    avctx->height, RKMPP_RGA_MIN_SIZE, RKMPP_RGA_MAX_SIZE);
-            return -1;
-        } else
-            rk_context->postrga_height = avctx->height;
-    } else
-        rk_context->postrga_format = AV_PIX_FMT_NONE;
-    return 0;
-}
-
-static int check_scaling(AVCodecContext *avctx, enum AVPixelFormat pix_fmt){
-    RKMPPCodecContext *rk_context = avctx->priv_data;
-
-    if(rk_context->postrga_width || rk_context->postrga_height){
-        if(pix_fmt != AV_PIX_FMT_NV16 && pix_fmt != AV_PIX_FMT_NV12 &&
-                pix_fmt != AV_PIX_FMT_YUV422P && pix_fmt != AV_PIX_FMT_YUV420P){
-            av_log(avctx, AV_LOG_ERROR, "Scaling is only supported for NV12,NV16,YUV420P,YUV422P. %s requested\n",
-                    av_get_pix_fmt_name(pix_fmt));
-            return -1;
-        }
-        // align it to accepted RGA range
-        rk_context->postrga_width = FFMAX(rk_context->postrga_width, RKMPP_RGA_MIN_SIZE);
-        rk_context->postrga_height = FFMAX(rk_context->postrga_height, RKMPP_RGA_MIN_SIZE);
-        rk_context->postrga_width = FFMIN(rk_context->postrga_width, RKMPP_RGA_MAX_SIZE);
-        rk_context->postrga_height = FFMIN(rk_context->postrga_height, RKMPP_RGA_MAX_SIZE);
-        avctx->width = rk_context->postrga_width;
-        avctx->height = rk_context->postrga_height;
-        if(rk_context->postrga_format == AV_PIX_FMT_NONE)
-            rk_context->postrga_format = pix_fmt;
-    }
     return 0;
 }
 
 int rkmpp_init_encoder(AVCodecContext *avctx){
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     RK_U8 enc_hdr_buf[HDR_SIZE];
     MppPacket packet = NULL;
@@ -362,32 +360,16 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
     int input_timeout = 500;
 
     // ENCODER SETUP
-    ret = mpp_enc_cfg_init(&codec->enccfg);
+    ret = mpp_enc_cfg_init(&rk_context->enccfg);
     if (ret) {
         av_log(avctx, AV_LOG_ERROR, "Codec failed to initialize encoder config (code = %d)\n", ret);
         ret = AVERROR_UNKNOWN;
         goto fail;
     }
 
-    ret = codec->mpi->control(codec->ctx, MPP_ENC_GET_CFG, codec->enccfg);
+    ret = rk_context->mpi->control(rk_context->ctx, MPP_ENC_GET_CFG, rk_context->enccfg);
     if (ret) {
         av_log(avctx, AV_LOG_ERROR, "Codec failed to get encoder config (code = %d)\n", ret);
-        ret = AVERROR_UNKNOWN;
-        goto fail;
-    }
-
-    if(avctx->pix_fmt != AV_PIX_FMT_DRM_PRIME){
-        if(check_vp8_planes(avctx, avctx->pix_fmt)){
-            ret = AVERROR_UNKNOWN;
-            goto fail;
-        }
-        if(check_scaling(avctx, avctx->pix_fmt)){
-            ret = AVERROR_UNKNOWN;
-            goto fail;
-        }
-    }
-
-    if(rkmpp_config(avctx)){
         ret = AVERROR_UNKNOWN;
         goto fail;
     }
@@ -404,7 +386,7 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
         }
 
         mpp_packet_set_length(packet, 0);
-        ret = codec->mpi->control(codec->ctx, MPP_ENC_GET_HDR_SYNC, packet);
+        ret = rk_context->mpi->control(rk_context->ctx, MPP_ENC_GET_HDR_SYNC, packet);
         if (ret != MPP_OK) {
             av_log(avctx, AV_LOG_ERROR, "Failed to get extra info on MPI (code = %d).\n", ret);
             ret = AVERROR_UNKNOWN;
@@ -430,7 +412,8 @@ int rkmpp_init_encoder(AVCodecContext *avctx){
         mpp_packet_deinit(&packet);
     }
 
-    codec->mpi->control(codec->ctx, MPP_SET_INPUT_TIMEOUT, &input_timeout);
+    rk_context->mpi->control(rk_context->ctx, MPP_SET_INPUT_TIMEOUT, &input_timeout);
+
     return 0;
 
 fail:
@@ -447,56 +430,45 @@ static void rkmpp_release_packet_buf(void *opaque, uint8_t *data){
 
 static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame mppframe = NULL;
-    rkformat format;
-    int ret=0, keepframe=0;
+    rkformat* informat = &rk_context->informat;
+    int ret=0;
 
-    // EOS frame, avframe=NULL
-    if (!frame) {
-        av_log(avctx, AV_LOG_DEBUG, "End of stream.\n");
-        mpp_frame_init(&mppframe);
-        mpp_frame_set_eos(mppframe, 1);
-    } else {
+    if (frame) {
+        if(rkmpp_config_decoder(avctx, frame))
+            return AVERROR_UNKNOWN;
+
         if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
-            // the frame is coming from a DRMPRIME enabled decoder, no copy necessary
+            AVDRMFrameDescriptor *desc = (AVDRMFrameDescriptor*) frame->data[0];
+            // the frame is coming from a DRMPRIME enabled decoder, no copy is necessary
             // just import existing fd and buffer to mmpp
-            mppframe = import_drm_to_mpp(avctx, frame);
-        } else {
+            mppframe = rkmpp_create_mpp_frame(frame->width, frame->height, &rk_context->informat,
+                                NULL, desc, NULL);
+        } else if (rk_context->swapformat.numplanes){
             // the frame is coming from a RKMPP decoder, no copy necessary
             // use existing mppframe which is atatched to
             // RKMPP_MPPFRAME_BUFINDEX of the frame buffers
             // those frames need to be cleaned by the decoder itself therefore dont clean them
-            mppframe = get_mppframe_from_av(frame);
-            if(mppframe)
-                keepframe = 1;
-            else
-                // soft frames needs to be copied to a buffer region where mpp supports.
-                // a copy is necessary here
-                mppframe = create_mpp_frame(frame->width, frame->height, avctx->pix_fmt, codec->buffer_group, NULL, frame);
-        }
+            mppframe = rkmpp_mppframe_from_av(frame);
+            informat = &rk_context->swapformat;
+        } else
+            // soft frames need to be copied to a buffer region where mpp supports.
+            // a copy is necessary here
+            mppframe = rkmpp_create_mpp_frame(frame->width, frame->height, &rk_context->informat,
+                    rk_context->buffer_group, NULL, frame);
 
         if(!mppframe){
             ret = AVERROR_UNKNOWN;
             goto clean;
         }
 
-        rkmpp_get_mpp_format(&format, mpp_frame_get_fmt(mppframe));
-
-        if(check_vp8_planes(avctx, format.av)){
-            ret = AVERROR_UNKNOWN;
-            goto clean;
-        }
-        if(check_scaling(avctx, format.av)){
-            ret = AVERROR_UNKNOWN;
-            goto clean;
-        }
-
-        if(rk_context->postrga_format != AV_PIX_FMT_NONE || rk_context->postrga_width || rk_context->postrga_height){
+        // create scaled mppframe and release the old one
+        if(rk_context->outformat.numplanes){
             MppFrame postmppframe = NULL;
+            int fence=-1;
 
-            postmppframe = create_mpp_frame(rk_context->postrga_width , rk_context->postrga_height, rk_context->postrga_format,
-                    codec->buffer_group, NULL, NULL);
+            postmppframe = rkmpp_create_mpp_frame(rk_context->outformat.planedata.width , rk_context->outformat.planedata.width,
+                    &rk_context->outformat, rk_context->buffer_group_rga, NULL, NULL);
 
             if(!postmppframe){
                 ret = AVERROR_UNKNOWN;
@@ -504,32 +476,29 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
                 goto clean;
             }
 
-            ret = rga_convert_mpp_mpp(avctx, mppframe, postmppframe);
+            ret = rkmpp_rga_convert_mpp_mpp(avctx, mppframe, informat, postmppframe, &rk_context->outformat, &fence);
             if(ret){
                 mpp_frame_deinit(&postmppframe);
                 av_log(avctx, AV_LOG_ERROR, "Error applying Post RGA\n");
                 goto clean;
             }
 
-            if(!keepframe)
+            if(!rk_context->swapformat.numplanes)
                 mpp_frame_deinit(&mppframe);
-            else
-                keepframe = 0;
 
             mppframe = postmppframe;
         }
 
         mpp_frame_set_pts(mppframe, frame->pts);
-    }
-
-    ret = rkmpp_config_withframe(avctx, mppframe, frame);
-    if(ret){
-        ret = AVERROR_UNKNOWN;
-        goto clean;
+    } else {
+        // EOS frame, avframe=NULL
+        av_log(avctx, AV_LOG_DEBUG, "End of stream.\n");
+        mpp_frame_init(&mppframe);
+        mpp_frame_set_eos(mppframe, 1);
     }
 
     // put the frame in encoder
-    ret = codec->mpi->encode_put_frame(codec->ctx, mppframe);
+    ret = rk_context->mpi->encode_put_frame(rk_context->ctx, mppframe);
 
     if (ret != MPP_OK) {
         av_log(avctx, AV_LOG_DEBUG, "Encoder buffer full\n");
@@ -538,22 +507,20 @@ static int rkmpp_send_frame(AVCodecContext *avctx, AVFrame *frame){
         av_log(avctx, AV_LOG_DEBUG, "Wrote %ld bytes to encoder\n", mpp_frame_get_buf_size(mppframe));
 
 clean:
-    if(!keepframe)
+    if(!rk_context->swapformat.numplanes)
         mpp_frame_deinit(&mppframe);
     return ret;
 }
 
-
 static int rkmpp_get_packet(AVCodecContext *avctx, AVPacket *packet, int timeout){
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppPacket mpppacket = NULL;
     MppMeta meta = NULL;
     int ret, keyframe=0;
 
-    codec->mpi->control(codec->ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&timeout);
+    rk_context->mpi->control(rk_context->ctx, MPP_SET_OUTPUT_TIMEOUT, (MppParam)&timeout);
 
-    ret = codec->mpi->encode_get_packet(codec->ctx, &mpppacket);
+    ret = rk_context->mpi->encode_get_packet(rk_context->ctx, &mpppacket);
 
     // rest of above code is never tested most likely broken
     if (ret != MPP_OK && ret != MPP_ERR_TIMEOUT) {
@@ -584,12 +551,11 @@ static int rkmpp_get_packet(AVCodecContext *avctx, AVPacket *packet, int timeout
         goto fail;
     }
 
-    //FIXME: This is low-res and does not cover b-frames.
 	packet->time_base.num = avctx->time_base.num;
     packet->time_base.den = avctx->time_base.den;
     packet->pts = mpp_packet_get_pts(mpppacket);
     packet->dts = mpp_packet_get_pts(mpppacket);
-    codec->frames++;
+    rk_context->frame_num++;
 
     meta = mpp_packet_get_meta(mpppacket);
     if (meta)
