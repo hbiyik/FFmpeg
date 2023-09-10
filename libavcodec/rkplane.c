@@ -95,8 +95,8 @@ static int set_drmdesc_to_avbuff(AVDRMFrameDescriptor *desc, AVFrame *frame){
     return i;
 }
 
-static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height,
-        uint64_t dst_fd, uint64_t dst_y, uint16_t dst_width, uint16_t dst_height,
+static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16_t src_height, uint16_t src_hstride, uint16_t src_vstride,
+        uint64_t dst_fd, uint64_t dst_y, uint16_t dst_width, uint16_t dst_height, uint16_t dst_hstride, uint16_t dst_vstride,
         MppFrameFormat informat, MppFrameFormat outformat){
     int src_wpixstride, src_hpixstride, dst_wpixstride, dst_hpixstride = 0;
     rkformat _informat, _outformat;
@@ -110,16 +110,16 @@ static int rga_scale(uint64_t src_fd, uint64_t src_y, uint16_t src_width, uint16
         src_wpixstride = src_width;
         src_hpixstride = src_height;
     } else {
-        src_wpixstride = FFALIGN(src_width, RKMPP_STRIDE_ALIGN);
-        src_hpixstride = FFALIGN(src_height, RKMPP_STRIDE_ALIGN);
+        src_wpixstride = src_hstride;
+        src_hpixstride = src_vstride;
     }
 
     if(_outformat.numplanes == 1){
         dst_wpixstride = dst_width;
         dst_hpixstride = dst_height;
     } else {
-        dst_wpixstride = FFALIGN(dst_width, RKMPP_STRIDE_ALIGN);
-        dst_hpixstride = FFALIGN(dst_height, RKMPP_STRIDE_ALIGN);
+        dst_wpixstride = dst_hstride;
+        dst_hpixstride = dst_vstride;
     }
 
     src.fd = src_fd;
@@ -148,8 +148,10 @@ int rga_convert_mpp_mpp(AVCodecContext *avctx, MppFrame in_mppframe, MppFrame ou
             return -1;
         if(rga_scale(mpp_buffer_get_fd(mpp_frame_get_buffer(in_mppframe)), 0,
             mpp_frame_get_width(in_mppframe), mpp_frame_get_height(in_mppframe),
+            mpp_frame_get_hor_stride(in_mppframe), mpp_frame_get_ver_stride(in_mppframe),
             mpp_buffer_get_fd(mpp_frame_get_buffer(out_mppframe)), 0,
             mpp_frame_get_width(out_mppframe), mpp_frame_get_height(out_mppframe),
+            mpp_frame_get_hor_stride(out_mppframe), mpp_frame_get_ver_stride(out_mppframe),
             mpp_frame_get_fmt(in_mppframe),
             mpp_frame_get_fmt(out_mppframe))){
                 av_log(avctx, AV_LOG_WARNING, "RGA failed falling back to soft conversion\n");
