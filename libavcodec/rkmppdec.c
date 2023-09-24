@@ -25,7 +25,7 @@
 int rkmpp_init_decoder(AVCodecContext *avctx){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
-
+    char *env;
     int ret;
 
     ret = codec->mpi->control(codec->ctx, MPP_DEC_SET_EXT_BUF_GROUP, codec->buffer_group);
@@ -39,9 +39,6 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
         av_log(avctx, AV_LOG_ERROR, "Failed to prepare Codec (code = %d)\n", ret);
         return AVERROR_UNKNOWN;
     }
-
-    avctx->coded_width = FFALIGN(avctx->width, 64);
-    avctx->coded_height = FFALIGN(avctx->height, 64);
 
     codec->hwdevice_ref = av_hwdevice_ctx_alloc(AV_HWDEVICE_TYPE_DRM);
     if (!codec->hwdevice_ref) {
@@ -57,6 +54,13 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
     if (!codec->hwframes_ref) {
         return AVERROR(ENOMEM);
     }
+
+    // override the the pixfmt according env variable
+    env = getenv("FFMPEG_RKMPP_PIXFMT");
+    if(env != NULL)
+        avctx->pix_fmt = av_get_pix_fmt(env);
+    else
+        avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
 
     return 0;
 }

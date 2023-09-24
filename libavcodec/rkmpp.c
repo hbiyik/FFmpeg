@@ -223,19 +223,6 @@ int rkmpp_init_codec(AVCodecContext *avctx)
 
         ret = 1;
         codec->mpi->control(codec->ctx, MPP_DEC_SET_PARSER_FAST_MODE, &ret);
-
-        avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
-
-        // override the the pixfmt according env variable
-        env = getenv("FFMPEG_RKMPP_PIXFMT");
-        if(env != NULL){
-            if(!strcmp(env, "YUV420P"))
-                avctx->pix_fmt = AV_PIX_FMT_YUV420P;
-            else if (!strcmp(env, "NV12"))
-                avctx->pix_fmt = AV_PIX_FMT_NV12;
-            else if(!strcmp(env, "DRMPRIME"))
-                avctx->pix_fmt = AV_PIX_FMT_DRM_PRIME;
-        }
     } else if ((ffcodec(avctx->codec)->cb_type == FF_CODEC_CB_TYPE_ENCODE)){
         codec->mppctxtype = MPP_CTX_ENC;
         codec->init_callback = rkmpp_init_encoder;
@@ -244,25 +231,6 @@ int rkmpp_init_codec(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_DEBUG, "RKMPP Codec can not determine if the mode is decoder or encoder\n");
         goto fail;
     }
-
-    // when the pixfmt is drmprime,
-    // decoder: we rely on mpp decoder to detect the actual frame format when first frame decoded
-    // encoder: we rely on fist avframe received to encoder
-    // normally, avctx should have actual frame format but due to missing implementation of other
-    // devices/encoders/decoders, we dont rely on them
-    if(!rkmpp_get_av_format(&rk_context->rkformat, avctx->pix_fmt))
-        rkmpp_planedata(&rk_context->rkformat, &rk_context->avplanes,avctx->width, avctx->height, RKMPP_STRIDE_ALIGN);
-    else if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME)
-        av_log(avctx, AV_LOG_INFO, "Picture format is %s.\n", av_get_pix_fmt_name(avctx->pix_fmt)); // detect actual format later
-    else {
-        av_log(avctx, AV_LOG_ERROR, "Unknown Picture format %s.\n", av_get_pix_fmt_name(avctx->pix_fmt)); // most likely never branches here
-        ret = AVERROR_UNKNOWN;
-        goto fail;
-    }
-
-    //nv12 format calcuöations are necessary for for NV15->NV12 conversion
-    rkmpp_get_av_format(&rk_context->nv12format, AV_PIX_FMT_NV12);
-    rkmpp_planedata(&rk_context->nv12format, &rk_context->nv12planes, avctx->width, avctx->height, RKMPP_STRIDE_ALIGN);
 
     // initialize mpp
     ret = mpp_init(codec->ctx, codec->mppctxtype, codectype);
@@ -291,6 +259,25 @@ int rkmpp_init_codec(AVCodecContext *avctx)
         av_log(avctx, AV_LOG_ERROR, "Failed to init Codec (code = %d).\n", ret);
         goto fail;
     }
+
+    // when the pixfmt is drmprime,
+    // decoder: we rely on mpp decoder to detect the actual frame format when first frame decoded
+    // encoder: we rely on fist avframe received to encoder
+    // normally, avctx should have actual frame format but due to missing implementation of other
+    // devices/encoders/decoders, we dont rely on them
+    if(!rkmpp_get_av_format(&rk_context->rkformat, avctx->pix_fmt))
+        rkmpp_planedata(&rk_context->rkformat, &rk_context->avplanes,avctx->width, avctx->height, RKMPP_STRIDE_ALIGN);
+    else if (avctx->pix_fmt != AV_PIX_FMT_DRM_PRIME) {
+        av_log(avctx, AV_LOG_ERROR, "Unknown Picture format %s.\n", av_get_pix_fmt_name(avctx->pix_fmt)); // most likely never branches here
+        ret = AVERROR_UNKNOWN;
+        goto fail;
+    }
+
+    av_log(avctx, AV_LOG_INFO, "Picture format is %s.\n", av_get_pix_fmt_name(avctx->pix_fmt));
+
+    //nv12 format calculations are necessary for for NV15->NV12 conversion
+    rkmpp_get_av_format(&rk_context->nv12format, AV_PIX_FMT_NV12);
+    rkmpp_planedata(&rk_context->nv12format, &rk_context->nv12planes, avctx->width, avctx->height, RKMPP_STRIDE_ALIGN);
 
     return 0;
 

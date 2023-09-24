@@ -238,7 +238,7 @@ static const FFCodecDefault rkmpp_enc_defaults[] = {
     { NULL }
 };
 
-static const enum AVPixelFormat rkmppvepu1formats[] = {
+static const enum AVPixelFormat rkmpp_vepu1_formats[] = {
         AV_PIX_FMT_NV16,
         AV_PIX_FMT_YUV422P,
         AV_PIX_FMT_YUYV422,
@@ -253,7 +253,7 @@ static const enum AVPixelFormat rkmppvepu1formats[] = {
         AV_PIX_FMT_NONE,
 };
 
-static const enum AVPixelFormat rkmppvepu5formats[] = {
+static const enum AVPixelFormat rkmpp_vepu5_formats[] = {
         AV_PIX_FMT_NV24,
         AV_PIX_FMT_YUV444P,
         AV_PIX_FMT_NV16,
@@ -271,17 +271,17 @@ static const enum AVPixelFormat rkmppvepu5formats[] = {
         AV_PIX_FMT_NONE,
 };
 
-static const enum AVPixelFormat decoderformats[] = {
+static const enum AVPixelFormat rkmpp_vdpu_formats[] = {
         AV_PIX_FMT_DRM_PRIME,
-        AV_PIX_FMT_NV12,
-        AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_YUYV422,
         AV_PIX_FMT_UYVY422,
+        AV_PIX_FMT_BGR24,
+        AV_PIX_FMT_NV12,
         AV_PIX_FMT_RGBA,
         AV_PIX_FMT_RGB0,
         AV_PIX_FMT_BGRA,
         AV_PIX_FMT_BGR0,
-        AV_PIX_FMT_BGR24,
+        AV_PIX_FMT_YUV420P,
         AV_PIX_FMT_NONE
 };
 
@@ -311,13 +311,8 @@ static const enum AVPixelFormat decoderformats[] = {
         RKMPP_CODEC(NAME, ID, BSFS, decoder) \
         FF_CODEC_RECEIVE_FRAME_CB(rkmpp_receive_frame), \
         .p.capabilities = AV_CODEC_CAP_DELAY | AV_CODEC_CAP_AVOID_PROBING | AV_CODEC_CAP_HARDWARE, \
-        .p.pix_fmts     = (const enum AVPixelFormat[]) { AV_PIX_FMT_DRM_PRIME, \
-                                                         AV_PIX_FMT_NV12, \
-                                                         AV_PIX_FMT_YUV420P, \
-                                                         AV_PIX_FMT_BGR24, \
-                                                         AV_PIX_FMT_NONE}, \
+        .p.pix_fmts     = rkmpp_vdpu_formats, \
         .hw_configs     = (const AVCodecHWConfigInternal *const []) { HW_CONFIG_INTERNAL(DRM_PRIME), \
-                                                                      HW_CONFIG_INTERNAL(NV12), \
                                                                       NULL}, \
     };
 
@@ -326,7 +321,7 @@ static const enum AVPixelFormat decoderformats[] = {
         FF_CODEC_ENCODE_CB(rkmpp_encode), \
         .p.capabilities = AV_CODEC_CAP_HARDWARE, \
         .defaults       = rkmpp_enc_defaults, \
-        .p.pix_fmts     = rkmpp##VEPU##formats, \
-        .hw_configs     = (const AVCodecHWConfigInternal *const []) { HW_CONFIG_INTERNAL(NV12), \
+        .p.pix_fmts     = rkmpp_##VEPU##_formats, \
+        .hw_configs     = (const AVCodecHWConfigInternal *const []) { HW_CONFIG_INTERNAL(DRM_PRIME), \
                                                                       NULL}, \
     };
