@@ -77,7 +77,7 @@ GETFORMAT(rga, enum _Rga_SURF_FORMAT)
 GETFORMAT(av, enum AVPixelFormat)
 
 int rkmpp_planedata(rkformat *format, planedata *planes, int width, int height, int align){
-    int hstride, totalsize = 0;
+    int hstride, size, totalsize = 0;
 
     planes->avformat = format->av;
     planes->vstride = FFALIGN(height, align);;
@@ -85,28 +85,37 @@ int rkmpp_planedata(rkformat *format, planedata *planes, int width, int height, 
     planes->height = height;
     planes->hstride = format->numplanes == 1 ? FFALIGN(width * format->planedata.plane[0].width, align) :  FFALIGN(width, align);
     hstride = planes->hstride;
+    size = hstride * planes->vstride;
 
     for(int i=0; i<format->numplanes; i++){
 
         if(format->mode == SHR){
             if(format->planedata.plane[i].width)
                 width = width >> format->planedata.plane[i].width;
-            if(format->planedata.plane[i].height)
+            if(format->planedata.plane[i].height){
                 height = height >> format->planedata.plane[i].height;
-            if(format->planedata.plane[i].hstride)
+                size = size >> format->planedata.plane[i].height;
+            }
+            if(format->planedata.plane[i].hstride){
                 hstride = hstride >> format->planedata.plane[i].hstride;
+                size = size >> format->planedata.plane[i].hstride;
+            }
         } else if(format->mode == MUL){
             if(format->planedata.plane[i].width)
                 width = width * format->planedata.plane[i].width;
-            if(format->planedata.plane[i].height)
+            if(format->planedata.plane[i].height){
                 height = height * format->planedata.plane[i].height;
-            if(format->planedata.plane[i].hstride)
+                size = size * format->planedata.plane[i].height;
+            }
+            if(format->planedata.plane[i].hstride){
                 hstride = hstride * format->planedata.plane[i].hstride;
+                size = size * format->planedata.plane[i].hstride;
+            }
         }
         planes->plane[i].width = width;
         planes->plane[i].height = height;
         planes->plane[i].hstride = hstride;
-        planes->plane[i].size =  planes->plane[i].hstride * FFALIGN(height, align);;
+        planes->plane[i].size =  size;
         planes->plane[i].offset = totalsize;
         totalsize += planes->plane[i].size;
     }
