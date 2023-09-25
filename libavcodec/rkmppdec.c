@@ -164,7 +164,7 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     mpp_color_space = mpp_frame_get_colorspace(mppframe);
     mpp_mode = mpp_frame_get_mode(mppframe);
 
-    if (rk_context->rkformat.av == AV_PIX_FMT_DRM_PRIME){
+    if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
         ret = import_mpp_to_drm(avctx, mppframe, frame);
     } else if (mpp_format == MPP_FMT_YUV420SP_10BIT && rk_context->rkformat.av == AV_PIX_FMT_NV12){
         ret = mpp_nv15_av_nv12(avctx, mppframe, frame);
