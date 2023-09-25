@@ -236,9 +236,18 @@ static MppFrame wrap_mpp_to_avframe(AVCodecContext *avctx, AVFrame *frame, MppFr
 
     targetbuffer = mpp_frame_get_buffer(targetframe);
     bufferaddr =  mpp_buffer_get_ptr(targetbuffer);
-    for(int i=0; i < rk_context->rkformat.numplanes; i++){
-        frame->data[i] = bufferaddr + rk_context->avplanes.plane[i].offset;
-        frame->linesize[i] = rk_context->avplanes.plane[i].hstride;
+    // only for NV12, stride is aligned to odd multiples of 256 from mpp due to optimizations
+    // therefore manually handling those, for else use the precalculated offsets
+    if(rk_context->rkformat.av == AV_PIX_FMT_NV12){
+        frame->data[0] = bufferaddr;
+        frame->linesize[0] = mpp_frame_get_hor_stride(targetframe);
+        frame->data[1] = frame->data[0] + mpp_frame_get_ver_stride(targetframe) * frame->linesize[0];
+        frame->linesize[1] = frame->linesize[0];
+    }else {
+        for(int i=0; i < rk_context->rkformat.numplanes; i++){
+            frame->data[i] = bufferaddr + rk_context->avplanes.plane[i].offset;
+            frame->linesize[i] = rk_context->avplanes.plane[i].hstride;
+        }
     }
     frame->extended_data = frame->data;
 
