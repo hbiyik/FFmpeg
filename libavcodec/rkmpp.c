@@ -182,6 +182,8 @@ int rkmpp_init_codec(AVCodecContext *avctx)
     MppCodingType codectype = MPP_VIDEO_CodingUnused;
     char *env;
     int ret;
+    int width = avctx->width;
+    int height = avctx->height;
 
     // create a codec and a ref to it
     codec = av_mallocz(sizeof(RKMPPCodec));
@@ -262,6 +264,7 @@ int rkmpp_init_codec(AVCodecContext *avctx)
        goto fail;
     }
 
+
     ret = codec->init_callback(avctx);
 
     if(ret){
@@ -275,7 +278,7 @@ int rkmpp_init_codec(AVCodecContext *avctx)
     // normally, avctx should have actual frame format but due to missing implementation of other
     // devices/encoders/decoders, we dont rely on them
     if(!rkmpp_get_av_format(&rk_context->rkformat, avctx->pix_fmt))
-        rkmpp_planedata(&rk_context->rkformat, &rk_context->avplanes,avctx->width, avctx->height, RKMPP_STRIDE_ALIGN);
+        rkmpp_planedata(&rk_context->rkformat, &rk_context->avplanes, width, height, RKMPP_STRIDE_ALIGN);
     else if (avctx->pix_fmt != AV_PIX_FMT_DRM_PRIME) {
         av_log(avctx, AV_LOG_ERROR, "Unknown Picture format %s.\n", av_get_pix_fmt_name(avctx->pix_fmt)); // most likely never branches here
         ret = AVERROR_UNKNOWN;
@@ -286,7 +289,7 @@ int rkmpp_init_codec(AVCodecContext *avctx)
 
     //nv12 format calculations are necessary for for NV15->NV12 conversion
     rkmpp_get_av_format(&rk_context->nv12format, AV_PIX_FMT_NV12);
-    rkmpp_planedata(&rk_context->nv12format, &rk_context->nv12planes, avctx->width, avctx->height, RKMPP_STRIDE_ALIGN);
+    rkmpp_planedata(&rk_context->nv12format, &rk_context->nv12planes, width, height, RKMPP_STRIDE_ALIGN);
 
     return 0;
 
