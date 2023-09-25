@@ -34,6 +34,9 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
         return AVERROR_UNKNOWN;
     }
 
+    avctx->coded_width = FFALIGN(avctx->width, 64);
+    avctx->coded_height = FFALIGN(avctx->height, 64);
+
     codec->mpi->control(codec->ctx, MPP_DEC_SET_DISABLE_ERROR, NULL);
     if (ret < 0) {
         av_log(avctx, AV_LOG_ERROR, "Failed to prepare Codec (code = %d)\n", ret);
