@@ -300,10 +300,6 @@ static int rkmpp_config(AVCodecContext *avctx){
 static int prepare_rga(AVCodecContext *avctx, enum AVPixelFormat pix_fmt){
     MppCodingType coding_type = rkmpp_get_codingtype(avctx);
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    if(pix_fmt == AV_PIX_FMT_NV24 || pix_fmt == AV_PIX_FMT_YUV444P){
-        av_log(avctx, AV_LOG_ERROR, "Scaling is not supported for format %s.\n",  av_get_pix_fmt_name(pix_fmt));
-        return -2;
-    }
 
     //https://github.com/rockchip-linux/mpp/issues/417
     //Encoder does not support 422 planes, but we can do this with rga
@@ -317,6 +313,10 @@ static int prepare_rga(AVCodecContext *avctx, enum AVPixelFormat pix_fmt){
     }
 
     if(rk_context->postrga_width || rk_context->postrga_height){
+        if(pix_fmt == AV_PIX_FMT_NV24 || pix_fmt == AV_PIX_FMT_YUV444P){
+            av_log(avctx, AV_LOG_ERROR, "Scaling is not supported for format %s.\n",  av_get_pix_fmt_name(pix_fmt));
+            return -2;
+        }
         // align it to accepted RGA range
         if(rk_context->postrga_width < RKMPP_RGA_MIN_SIZE ||
                 rk_context->postrga_width > RKMPP_RGA_MAX_SIZE ||
