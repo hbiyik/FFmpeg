@@ -323,7 +323,7 @@ int mpp_nv15_av_yuv420p(AVCodecContext *avctx, MppFrame nv15frame, AVFrame *fram
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppFrame nv12frame = create_mpp_frame(mpp_frame_get_width(nv15frame), mpp_frame_get_height(nv15frame),
-            &rk_context->nv12format, codec->buffer_group, NULL, NULL, NULL);
+            &rk_context->nv12format, codec->buffer_group, NULL, NULL, &rk_context->nv12planes);
     MppFrame yuv420pframe = NULL;
     int ret = rga_convert_mpp_mpp(avctx, nv15frame, nv12frame);
 
