@@ -28,16 +28,10 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
     char *env;
     int ret;
 
-    ret = codec->mpi->control(codec->ctx, MPP_DEC_SET_EXT_BUF_GROUP, codec->buffer_group);
-    if (ret) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to assign buffer group (code = %d)\n", ret);
-        return AVERROR_UNKNOWN;
-    }
-
     avctx->coded_width = FFALIGN(avctx->width, 64);
     avctx->coded_height = FFALIGN(avctx->height, 64);
 
-    codec->mpi->control(codec->ctx, MPP_DEC_SET_DISABLE_ERROR, NULL);
+    ret = codec->mpi->control(codec->ctx, MPP_DEC_SET_DISABLE_ERROR, NULL) == MPP_OK;
     if (ret < 0) {
         av_log(avctx, AV_LOG_ERROR, "Failed to prepare Codec (code = %d)\n", ret);
         return AVERROR_UNKNOWN;
@@ -64,6 +58,30 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
         avctx->pix_fmt = av_get_pix_fmt(env);
     else
         avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
+
+    ret = rkmpp_buffer_set(avctx, rk_context->nv12planes.size * 2, DMABUF_CODEC);
+    if (ret) {
+       av_log(avctx, AV_LOG_ERROR, "Failed allocate mem for codec (code = %d)\n", ret);
+       ret = AVERROR_UNKNOWN;
+       return -1;
+    }
+
+    ret = codec->mpi->control(codec->ctx, MPP_DEC_SET_EXT_BUF_GROUP, codec->buffer_group);
+    if (ret) {
+        av_log(avctx, AV_LOG_ERROR, "Failed to assign buffer group for codec (code = %d)\n", ret);
+        return ret;
+    }
+
+    rkmpp_get_av_format(&rk_context->rgaformat, avctx->pix_fmt);
+    rkmpp_planedata(&rk_context->rgaformat, &rk_context->rgaplanes,  avctx->width,
+            avctx->height, RKMPP_STRIDE_ALIGN);
+
+    ret = rkmpp_buffer_set(avctx, rk_context->rgaplanes.size + 1024, DMABUF_RGA);
+    if (ret) {
+       av_log(avctx, AV_LOG_ERROR, "Failed to allocate memory for rga (code = %d)\n", ret);
+       ret = AVERROR_UNKNOWN;
+       return -1;
+    }
 
     return 0;
 }
@@ -175,7 +193,7 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
     } else {
         rkformat informat;
         rkmpp_get_mpp_format(&informat, mpp_format);
-        ret = convert_mpp_to_av(avctx, mppframe, frame, informat.av, rk_context->rkformat.av);
+        ret = convert_mpp_to_av(avctx, mppframe, frame, informat.av, rk_context->rkformat.av, codec->buffer_group_rga);
     }
 
     if(ret < 0){

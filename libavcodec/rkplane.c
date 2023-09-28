@@ -218,14 +218,13 @@ static void mpp_nv16_av_nv12_soft(MppFrame mppframe, AVFrame *frame){
     frame->linesize[0] = hstride;
 }
 
-static MppFrame wrap_mpp_to_avframe(AVCodecContext *avctx, AVFrame *frame, MppFrame targetframe){
+static MppFrame wrap_mpp_to_avframe(AVCodecContext *avctx, AVFrame *frame, MppFrame targetframe, MppBufferGroup buffergroup){
     RKMPPCodecContext *rk_context = avctx->priv_data;
-    RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
     MppBuffer targetbuffer = NULL;
     char * bufferaddr;
 
     if(!targetframe)
-        targetframe = create_mpp_frame(avctx->width, avctx->height, &rk_context->rkformat, codec->buffer_group,
+        targetframe = create_mpp_frame(avctx->width, avctx->height, &rk_context->rkformat, buffergroup,
                 NULL, NULL, &rk_context->avplanes);
 
     if(!targetframe)
@@ -339,7 +338,7 @@ int mpp_nv15_av_yuv420p(AVCodecContext *avctx, MppFrame nv15frame, AVFrame *fram
     rkmpp_release_mppframe(nv15frame, NULL);
 
     if(!ret){
-        MppFrame yuv420pframe = wrap_mpp_to_avframe(avctx, frame, NULL);
+        MppFrame yuv420pframe = wrap_mpp_to_avframe(avctx, frame, NULL, codec->buffer_group_rga);
         if(yuv420pframe &&
                 !set_mppframe_to_avbuff(nv12frame, frame, RKMPP_MPPFRAME_BUFINDEX) &&
                 !set_mppframe_to_avbuff(yuv420pframe, frame, RKMPP_MPPFRAME_BUFINDEX - 1)){
@@ -357,7 +356,7 @@ int mpp_nv15_av_yuv420p(AVCodecContext *avctx, MppFrame nv15frame, AVFrame *fram
 
 //for decoder
 int mpp_nv12_av_nv12(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame){
-    if(wrap_mpp_to_avframe(avctx, frame, mppframe)){
+    if(wrap_mpp_to_avframe(avctx, frame, mppframe, NULL)){
         return set_mppframe_to_avbuff(mppframe, frame, RKMPP_MPPFRAME_BUFINDEX);
     }
 
@@ -386,8 +385,8 @@ int mpp_nv15_av_nv12(AVCodecContext *avctx, MppFrame nv15frame, AVFrame *frame){
 }
 
 int convert_mpp_to_av(AVCodecContext *avctx, MppFrame mppframe, AVFrame *frame,
-        enum AVPixelFormat informat, enum AVPixelFormat outformat){
-    MppFrame targetframe = wrap_mpp_to_avframe(avctx, frame, NULL);
+        enum AVPixelFormat informat, enum AVPixelFormat outformat, MppBufferGroup buffergroup){
+    MppFrame targetframe = wrap_mpp_to_avframe(avctx, frame, NULL, buffergroup);
     int ret=0;
 
     if(!targetframe){

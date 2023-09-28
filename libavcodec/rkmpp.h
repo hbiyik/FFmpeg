@@ -28,6 +28,8 @@
 #define RKMPP_RGA_MIN_SIZE 128
 #define RKMPP_RGA_MAX_SIZE 4096
 #define RKMPP_MPPFRAME_BUFINDEX 7
+#define RKMPP_DMABUF_COUNT 16
+#define RKMPP_DMABUF_RGA_COUNT 16
 #define HDR_SIZE 1024
 #define QMAX_H26x 51
 #define QMIN_H26x 10
@@ -41,7 +43,6 @@
 #define MUL 2
 #define DIV 3
 
-
 #define DRMFORMATNAME(buf, format) \
     buf[0] = format & 0xff; \
     buf[1] = (format >> 8) & 0xff; \
@@ -52,6 +53,7 @@ typedef struct {
     MppCtx ctx;
     MppApi *mpi;
     MppBufferGroup buffer_group;
+    MppBufferGroup buffer_group_rga;
     MppCtxType mppctxtype;
     MppEncCfg enccfg;
     int hascfg;
@@ -62,6 +64,9 @@ typedef struct {
     AVFrame lastframe;
     AVBufferRef *hwframes_ref;
     AVBufferRef *hwdevice_ref;
+    MppBufferInfo dmainfo[RKMPP_DMABUF_COUNT];
+    MppBufferInfo dmainfo_rga[RKMPP_DMABUF_RGA_COUNT];
+    int dma_fd;
 
     char print_fps;
     uint64_t last_frame_time;
@@ -71,6 +76,13 @@ typedef struct {
     int8_t norga;
     int (*init_callback)(struct AVCodecContext *avctx);
 } RKMPPCodec;
+
+
+typedef enum {
+    DMABUF_CODEC,
+    DMABUF_RGA,
+    DMABUF_HDR,
+} dmabuf;
 
 typedef struct {
     int offset;
@@ -135,6 +147,8 @@ void rkmpp_release_codec(void *opaque, uint8_t *data);
 void rkmpp_flush(AVCodecContext *avctx);
 uint64_t rkmpp_update_latency(AVCodecContext *avctx, int latency);
 int rkmpp_planedata(rkformat *format, planedata *planes, int width, int height, int align);
+void rkmpp_buffer_free(MppBufferInfo *dma_info);
+int rkmpp_buffer_set(AVCodecContext *avctx, size_t size, dmabuf dmabuf);
 
 #define OFFSET(x) offsetof(RKMPPCodecContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
