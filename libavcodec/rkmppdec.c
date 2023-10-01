@@ -59,19 +59,6 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
     else
         avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
 
-    ret = rkmpp_buffer_set(avctx, rk_context->nv12planes.size * 2, DMABUF_CODEC);
-    if (ret) {
-       av_log(avctx, AV_LOG_ERROR, "Failed allocate mem for codec (code = %d)\n", ret);
-       ret = AVERROR_UNKNOWN;
-       return -1;
-    }
-
-    ret = codec->mpi->control(codec->ctx, MPP_DEC_SET_EXT_BUF_GROUP, codec->buffer_group);
-    if (ret) {
-        av_log(avctx, AV_LOG_ERROR, "Failed to assign buffer group for codec (code = %d)\n", ret);
-        return ret;
-    }
-
     rkmpp_get_av_format(&rk_context->rgaformat, avctx->pix_fmt);
     rkmpp_planedata(&rk_context->rgaformat, &rk_context->rgaplanes,  avctx->width,
             avctx->height, RKMPP_STRIDE_ALIGN);
@@ -154,6 +141,18 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
             } else if (mpp_format == MPP_FMT_YUV420SP_10BIT)
                 av_log(avctx, AV_LOG_WARNING, "10bit NV15 plane will be downgraded to 8bit %s.\n", av_get_pix_fmt_name(avctx->pix_fmt));
             codec->hascfg = 1;
+        }
+
+        ret = rkmpp_buffer_set(avctx, mpp_frame_get_buf_size(mppframe), DMABUF_CODEC);
+        if (ret) {
+           av_log(avctx, AV_LOG_ERROR, "Failed allocate mem for codec (code = %d)\n", ret);
+           goto clean;
+        }
+
+        ret = codec->mpi->control(codec->ctx, MPP_DEC_SET_EXT_BUF_GROUP, codec->buffer_group);
+        if (ret) {
+            av_log(avctx, AV_LOG_ERROR, "Failed to assign buffer group for codec (code = %d)\n", ret);
+            goto clean;
         }
 
         av_log(avctx, AV_LOG_INFO, "Decoder noticed an info change\n");
