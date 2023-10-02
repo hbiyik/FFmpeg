@@ -59,15 +59,17 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
     else
         avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
 
-    rkmpp_get_av_format(&rk_context->rgaformat, avctx->pix_fmt);
-    rkmpp_planedata(&rk_context->rgaformat, &rk_context->rgaplanes,  avctx->width,
-            avctx->height, RKMPP_STRIDE_ALIGN);
+    if(avctx->pix_fmt != AV_PIX_FMT_DRM_PRIME && avctx->pix_fmt != AV_PIX_FMT_NV12 && !codec->norga){
+        rkmpp_get_av_format(&rk_context->rgaformat, avctx->pix_fmt);
+        rkmpp_planedata(&rk_context->rgaformat, &rk_context->rgaplanes,  avctx->width,
+                avctx->height, RKMPP_STRIDE_ALIGN);
 
-    ret = rkmpp_buffer_set(avctx, rk_context->rgaplanes.size + 1024, DMABUF_RGA);
-    if (ret) {
-       av_log(avctx, AV_LOG_ERROR, "Failed to allocate memory for rga (code = %d)\n", ret);
-       ret = AVERROR_UNKNOWN;
-       return -1;
+        ret = rkmpp_buffer_set(avctx, rk_context->rgaplanes.size + 1024, DMABUF_RGA);
+        if (ret) {
+           av_log(avctx, AV_LOG_ERROR, "Failed to allocate memory for rga (code = %d)\n", ret);
+           ret = AVERROR_UNKNOWN;
+           return -1;
+        }
     }
 
     return 0;
