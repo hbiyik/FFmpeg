@@ -64,7 +64,7 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
         rkmpp_planedata(&rk_context->rgaformat, &rk_context->rgaplanes,  avctx->width,
                 avctx->height, RKMPP_STRIDE_ALIGN);
 
-        ret = rkmpp_buffer_set(avctx, rk_context->rgaplanes.size + 1024, DMABUF_RGA);
+        ret = rkmpp_buffer_set(avctx, rk_context->rgaplanes.size, codec->buffer_group_rga, RKMPP_DMABUF_RGA_COUNT);
         if (ret) {
            av_log(avctx, AV_LOG_ERROR, "Failed to allocate memory for rga (code = %d)\n", ret);
            ret = AVERROR_UNKNOWN;
@@ -145,7 +145,7 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame, int timeout)
             codec->hascfg = 1;
         }
 
-        ret = rkmpp_buffer_set(avctx, mpp_frame_get_buf_size(mppframe), DMABUF_CODEC);
+        ret = rkmpp_buffer_set(avctx, mpp_frame_get_buf_size(mppframe), codec->buffer_group, RKMPP_DMABUF_COUNT);
         if (ret) {
            av_log(avctx, AV_LOG_ERROR, "Failed allocate mem for codec (code = %d)\n", ret);
            goto clean;
