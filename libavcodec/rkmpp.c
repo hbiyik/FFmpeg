@@ -163,20 +163,16 @@ void rkmpp_release_codec(void *opaque, uint8_t *data)
 {
     RKMPPCodec *codec = (RKMPPCodec *)data;
 
+    if (codec->buffer_group)
+        mpp_buffer_group_clear(codec->buffer_group);
+
+    if (codec->buffer_group_rga)
+        mpp_buffer_group_clear(codec->buffer_group_rga);
+
     if (codec->mpi) {
         codec->mpi->reset(codec->ctx);
         mpp_destroy(codec->ctx);
         codec->ctx = NULL;
-    }
-
-    if (codec->buffer_group) {
-        mpp_buffer_group_put(codec->buffer_group);
-        codec->buffer_group = NULL;
-    }
-
-    if (codec->buffer_group_rga) {
-        mpp_buffer_group_put(codec->buffer_group_rga);
-        codec->buffer_group_rga = NULL;
     }
 
     if(codec->hwframes_ref)
