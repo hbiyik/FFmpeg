@@ -28,7 +28,7 @@
 #define RKMPP_RGA_MIN_SIZE 128
 #define RKMPP_RGA_MAX_SIZE 4096
 #define RKMPP_MPPFRAME_BUFINDEX 7
-#define RKMPP_DMABUF_COUNT 16
+#define RKMPP_DMABUF_COUNT 20
 #define RKMPP_DMABUF_RGA_COUNT 4
 #define HDR_SIZE 1024
 #define QMAX_H26x 51
@@ -139,7 +139,7 @@ void rkmpp_flush(AVCodecContext *avctx);
 uint64_t rkmpp_update_latency(AVCodecContext *avctx, int latency);
 int rkmpp_planedata(rkformat *format, planedata *planes, int width, int height, int align);
 void rkmpp_buffer_free(MppBufferInfo *dma_info);
-MPP_RET rkmpp_buffer_set(AVCodecContext *avctx, size_t size, MppBufferGroup buffer_group, int count);
+MPP_RET rkmpp_buffer_set(AVCodecContext *avctx, size_t size, MppBufferGroup *buffer_group, int count);
 
 #define OFFSET(x) offsetof(RKMPPCodecContext, x)
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM

@@ -367,20 +367,20 @@ void rkmpp_buffer_free(MppBufferInfo *dma_info)
     dma_info->index = 0;
 }
 
-MPP_RET rkmpp_buffer_set(AVCodecContext *avctx, size_t size, MppBufferGroup buffer_group, int count)
+MPP_RET rkmpp_buffer_set(AVCodecContext *avctx, size_t size, MppBufferGroup *buffer_group, int count)
 {
     MPP_RET ret=MPP_SUCCESS;
     RKMPPCodecContext *rk_context = avctx->priv_data;
     RKMPPCodec *codec = (RKMPPCodec *)rk_context->codec_ref->data;
 
-    if (buffer_group) {
-        if ((ret = mpp_buffer_group_clear(buffer_group)) != MPP_OK) {
+    if (*buffer_group) {
+        if ((ret = mpp_buffer_group_clear(*buffer_group)) != MPP_OK) {
             av_log(avctx, AV_LOG_ERROR, "Failed to clear external buffer group: %d\n", ret);
             return ret;
         }
     }
 
-    ret = mpp_buffer_group_get_external(&buffer_group, MPP_BUFFER_TYPE_DMA_HEAP);
+    ret = mpp_buffer_group_get_external(buffer_group, MPP_BUFFER_TYPE_DMA_HEAP);
     if (ret) {
        av_log(avctx, AV_LOG_ERROR, "Failed to get buffer group (code = %d)\n", ret);
        return ret;
@@ -403,7 +403,7 @@ MPP_RET rkmpp_buffer_set(AVCodecContext *avctx, size_t size, MppBufferGroup buff
 
         buf_info.fd = alloc.fd;
         buf_info.ptr = mmap(NULL, alloc.len, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.fd, 0),
-        ret = mpp_buffer_commit(buffer_group, &buf_info);
+        ret = mpp_buffer_commit(*buffer_group, &buf_info);
         if (ret) {
             av_log(avctx, AV_LOG_ERROR, "Failed to commit external buffer group: %d\n", ret);
             return ret;
