@@ -2723,11 +2723,11 @@ static const AVPixFmtDescriptor av_pix_fmt_descriptors[AV_PIX_FMT_NB] = {
         .log2_chroma_w = 1,
         .log2_chroma_h = 1,
         .comp = {
-            { 0, 1, 0, 0, 10 },        /* Y */
-            { 1, 2, 0, 0, 10 },        /* U */
-            { 1, 2, 1, 0, 10 },        /* V */
+            { 0, 10, 0, 0, 10 },        /* Y */
+            { 1, 20, 0, 0, 10 },        /* U */
+            { 1, 20, 10, 0, 10 },       /* V */
         },
-        .flags = AV_PIX_FMT_FLAG_PLANAR,
+        .flags = AV_PIX_FMT_FLAG_PLANAR | AV_PIX_FMT_FLAG_BITSTREAM,
     },
 };
 
