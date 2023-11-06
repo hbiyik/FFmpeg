@@ -29,7 +29,7 @@ static int prepare_rga(AVCodecContext *avctx, rkformat* informat){
     if(informat->av == AV_PIX_FMT_NV15 ||
             (coding_type == MPP_VIDEO_CodingVP8 && (informat->av == AV_PIX_FMT_NV16 || informat->av == AV_PIX_FMT_YUV422P))){
         rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_BGR0,
-                informat->planedata.width, informat->planedata.height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                informat->planedata.width, informat->planedata.height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
         if(!rk_context->postrga_width)
             rk_context->postrga_width = informat->planedata.width;
         if(!rk_context->postrga_height)
@@ -54,7 +54,7 @@ static int prepare_rga(AVCodecContext *avctx, rkformat* informat){
         avctx->height = rk_context->postrga_height;
         if(rk_context->outformat.numplanes == 0) // if not previously set by the VP8 RGBA hack
             rkmpp_get_av_format(&rk_context->outformat, informat->av,
-                    rk_context->postrga_width, rk_context->postrga_height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                    rk_context->postrga_width, rk_context->postrga_height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
     }
 
     return 0;
@@ -85,18 +85,18 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, AVFrame* frame){
         else
             vstride = layer->planes[1].offset / hstride;
         rkmpp_get_drm_format(&rk_context->informat, layer->format,
-                avctx->width, avctx->height, 0, hstride, vstride, 0, size, 0);
+                avctx->width, avctx->height, 0, hstride, vstride, 0, size, 0, 0);
     } else {
         mppframe = rkmpp_mppframe_from_av(frame);
         if(mppframe){
             rkmpp_get_mpp_format(&rk_context->swapformat, mpp_frame_get_fmt(mppframe),
                     mpp_frame_get_width(mppframe), mpp_frame_get_height(mppframe), 0,
                     mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
-                    mpp_frame_get_buf_size(mppframe), 0);
+                    mpp_frame_get_buf_size(mppframe), 0, 0);
             informat = &rk_context->swapformat;
         } else {
             rkmpp_get_av_format(&rk_context->informat, avctx->pix_fmt,
-                    avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                    avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
             if(rkmpp_buffer_alloc(avctx, rk_context->informat.planedata.overshoot,
                     &rk_context->buffer_group, rk_context->dma_enc_count))
                 return -4;

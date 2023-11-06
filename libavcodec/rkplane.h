@@ -144,15 +144,15 @@ typedef struct {
 
 
 int rkmpp_get_drm_format(rkformat *format, uint32_t informat, int width, int height, int align,
-        int hstride, int vstride, int ypixoffset, int overshoot, factor* uvfactor);
+        int hstride, int vstride, int ypixoffset, int overshoot, int fbc, factor* uvfactor);
 int rkmpp_get_mpp_format(rkformat *format, MppFrameFormat informat, int width, int height, int align,
-        int hstride, int vstride, int ypixoffset, int overshoot, factor* uvfactor);
+        int hstride, int vstride, int ypixoffset, int overshoot, int fbc, factor* uvfactor);
 int rkmpp_get_rga_format(rkformat *format, enum _Rga_SURF_FORMAT informat, int width, int height, int align,
-        int hstride, int vstride, int ypixoffset, int overshoot, factor* uvfactor);
+        int hstride, int vstride, int ypixoffset, int overshoot, int fbc, factor* uvfactor);
 int rkmpp_get_av_format(rkformat *format, enum AVPixelFormat informat, int width, int height, int align,
-        int hstride, int vstride, int ypixoffset, int overshoot, factor* uvfactor);
+        int hstride, int vstride, int ypixoffset, int overshoot, int fbc, factor* uvfactor);
 void rkmpp_planedata(rkformat *format, int width, int height, int align, int hstride, int vstride,
-        int ypixoffset, int overshoot, factor* uvfactor);
+        int ypixoffset, int overshoot, int fbc, factor* uvfactor);
 int rkmpp_set_mppframe_to_av(AVCodecContext *avctx, MppFrameItem *cache, AVFrame* frame, int index);
 int rkmpp_set_drmdesc_to_av(AVDRMFrameDescriptor *desc, AVFrame *frame);
 int rkmpp_rga_convert_mpp_mpp(AVCodecContext *avctx, MppFrame in_mppframe, rkformat* in_format,

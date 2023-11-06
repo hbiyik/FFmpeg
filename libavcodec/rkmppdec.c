@@ -168,9 +168,7 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
 
     rkmpp_get_mpp_format(&rk_context->informat, mpp_format, avctx->width, avctx->height, 0,
             mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), mpp_frame_get_offset_y(mppframe),
-            mpp_frame_get_buf_size(mppframe), 0);
-
-    rk_context->informat.fbc = isfbc;
+            mpp_frame_get_buf_size(mppframe), isfbc, 0);
 
     // determine the decoding flow
     if(rk_context->hascfg)
@@ -180,17 +178,17 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
         if(rk_context->informat.av == AV_PIX_FMT_NV15){
             if(rk_context->drm_hdrbits == 16) // P010
                 rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_P010LE,
-                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
             else if (rk_context->drm_hdrbits == 8) // NV12
                 rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_NV12,
-                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
             rk_context->codec_flow = CONVERT;
         }
         if(!rk_context->outformat.numplanes){
             rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
                     avctx->width, avctx->height, 0,
                     mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
-                    mpp_frame_get_buf_size(mppframe), 0);
+                    mpp_frame_get_buf_size(mppframe), 0, 0);
             rk_context->codec_flow = NOCONVERSION;
         }
         hwframes = (AVHWFramesContext*)rk_context->hwframes_ref->data;
@@ -204,7 +202,7 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
         if( avctx->pix_fmt == AV_PIX_FMT_YUV420P10LE){
             // nv15(mpp) -> P010(rga3, swap) -> YUV420P10 (soft)
             rkmpp_get_av_format(&rk_context->swapformat, AV_PIX_FMT_P010LE,
-                    avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                    avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
             // important note:
             // normally, P010 is msb aligned, with little endian byte order and LSB bit order
             // we force rga to output lsb aligned planes because,
@@ -216,16 +214,16 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
                 (avctx->pix_fmt == AV_PIX_FMT_YUV420P || avctx->pix_fmt == AV_PIX_FMT_YUV422P || avctx->pix_fmt == AV_PIX_FMT_YUV444P)){
            // nv15(mpp) -> NV12(rga3, swap) -> YUV420P (rga2 or soft when >4k)
             rkmpp_get_av_format(&rk_context->swapformat, AV_PIX_FMT_NV12,
-                    avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                    avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
             rk_context->codec_flow = SWAPANDCONVERT;
         } else if (rk_context->informat.fbc && rk_context->libyuv){ // libyuv needs uncompressed Y plane
             rkmpp_get_av_format(&rk_context->swapformat, rk_context->informat.av,
-                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
             rk_context->codec_flow = SWAPANDCONVERT;
         } else if (rk_context->informat.fbc && // rga2 can not afbc
                 (avctx->pix_fmt == AV_PIX_FMT_YUV420P || avctx->pix_fmt == AV_PIX_FMT_YUV422P || avctx->pix_fmt == AV_PIX_FMT_YUV444P)){
             rkmpp_get_av_format(&rk_context->swapformat, rk_context->informat.av,
-                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
             rk_context->codec_flow = SWAPANDCONVERT;
         } else
             rk_context->codec_flow = CONVERT;
@@ -233,23 +231,23 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
         // determine the output format
         if(rk_context->codec_flow == SWAPANDCONVERT){ // give libyuv swap format u plane
             rkmpp_get_av_format(&rk_context->outformat, avctx->pix_fmt,
-                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0,
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0,
                             rk_context->libyuv ? &rk_context->swapformat.factors[1] : 0);
         } else if(rk_context->codec_flow == CONVERT){ // give libyuv input format u plane
             rkmpp_get_av_format(&rk_context->outformat, avctx->pix_fmt,
-                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0,
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0,
                             rk_context->libyuv ? &rk_context->informat.factors[1] : 0);
         }
 
     } else if (rk_context->informat.fbc) {
         rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
-                avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0);
+                avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
         rk_context->codec_flow = CONVERT;
     } else {
         rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
                 avctx->width, avctx->height, 0,
                 mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
-                mpp_frame_get_buf_size(mppframe), 0);
+                mpp_frame_get_buf_size(mppframe), 0, 0);
         rk_context->codec_flow = NOCONVERSION;
     }
 

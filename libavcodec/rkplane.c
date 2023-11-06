@@ -77,10 +77,10 @@ static rkformat rkformats[16] = {
 
 #define GETFORMAT(NAME, TYPE)\
 int rkmpp_get_##NAME##_format(rkformat *format, TYPE informat, int width, int height, int align,\
-        int hstride, int vstride, int ypixoffset, int overshoot, factor* uvfactor){ \
+        int hstride, int vstride, int ypixoffset, int overshoot, int fbc, factor* uvfactor){ \
     for(int i=0; i < FF_ARRAY_ELEMS(rkformats); i++){ \
         if(rkformats[i].NAME == informat){ \
-            rkmpp_planedata(&rkformats[i], width, height, align, hstride, vstride, ypixoffset, overshoot, uvfactor); \
+            rkmpp_planedata(&rkformats[i], width, height, align, hstride, vstride, ypixoffset, overshoot, fbc, uvfactor); \
             format->av = rkformats[i].av;\
             format->mpp = rkformats[i].mpp;\
             format->drm = rkformats[i].drm;\
@@ -93,7 +93,7 @@ int rkmpp_get_##NAME##_format(rkformat *format, TYPE informat, int width, int he
             format->qual = rkformats[i].qual;\
             format->rga_uncompact = rkformats[i].rga_uncompact;\
             format->rga_msb_aligned = rkformats[i].rga_msb_aligned;\
-            format->fbc = rkformats[i].fbc;\
+            format->fbc = fbc;\
             format->ypixoffset = ypixoffset;\
             memcpy(format->factors, rkformats[i].factors, sizeof(rkformats[i].factors));\
             return 0;\
@@ -124,7 +124,7 @@ static int rkmpp_scale_fract(int val, int fract1, int fract1_div,
 }
 
 void rkmpp_planedata(rkformat *format, int width, int height, int align, int hstride, int vstride,
-        int ypixoffset, int overshoot, factor* planar_uvfactor){
+        int ypixoffset, int overshoot, int fbc, factor* planar_uvfactor){
     planedata *planedata = &format->planedata;
     factor *factors = format->factors;
     int size, totalsize=0;
@@ -145,12 +145,12 @@ void rkmpp_planedata(rkformat *format, int width, int height, int align, int hst
     if (vstride)
         planedata->vstride = vstride;
     else
-        planedata->vstride = FFALIGN(height, align);
+        planedata->vstride = FFALIGN(height + ypixoffset, align);
 
-    // rga works this way
-    if(format->numplanes == 1){
-        planedata->hstride_pix = width;
-        planedata->vstride_pix = height;
+    // rga works this way, i don't really get the logic :/
+    if(format->numplanes == 1 || (format->av == AV_PIX_FMT_NV15 && fbc)){
+        planedata->hstride_pix = FFALIGN(width, 2);
+        planedata->vstride_pix = FFALIGN(height + ypixoffset, 2);
     } else {
         planedata->hstride_pix = planedata->hstride;
         planedata->vstride_pix = planedata->vstride;
