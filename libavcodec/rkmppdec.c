@@ -807,8 +807,6 @@ receive_loop:
 
    if(ret_send_packet == AVERROR(EAGAIN) && ret_get_frame == AVERROR(EAGAIN))
        goto send_loop;
-   else if (rk_context->mpp_rga_fifo.used)
-       goto receive_loop;
    else if(avci->draining){
        // some players (ie: kodi) are tricky, keep this here for sanity
        if(!rk_context->mpp_decode_fifo.used && !rk_context->mpp_rga_fifo.used)
