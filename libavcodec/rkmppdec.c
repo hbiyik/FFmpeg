@@ -46,9 +46,56 @@ static void rkmpp_frame_logtimecsv(AVCodecContext *avctx, MppFrameItem* item){
                         item->rga->timestamp.tv_nsec);
 }
 
-int rkmpp_init_decoder(AVCodecContext *avctx){
+static int rkmpp_dec_defaults(AVCodecContext *avctx){
     RKMPPCodecContext *rk_context = avctx->priv_data;
     MppFrameFormat afbc = MPP_FRAME_FBC_AFBC_V2;
+
+    if(rk_context->fbc == -1){
+        // https://github.com/rockchip-linux/mpp/issues/453?#issuecomment-1776324884
+        // RGA3 can not handle >8k
+        if(rkmpp_get_codingtype(avctx) == MPP_VIDEO_CodingAV1 ||
+                avctx->width > 7680 || avctx->height > 4320)
+            rk_context->fbc = RKMPP_FBC_NONE;
+        else
+            rk_context->fbc = RKMPP_FBC_DECODER;
+    }
+
+    if (rk_context->fbc != RKMPP_FBC_NONE && rk_context->mpi->control(rk_context->ctx, MPP_DEC_SET_OUTPUT_FORMAT, &afbc)) {
+        av_log(avctx, AV_LOG_ERROR, "Can not set afbc format");
+        return AVERROR_UNKNOWN;
+    }
+
+    if(rk_context->libyuv == -1){
+        // yuv420/2p > 4k & yuv420p10 and yuv444p modes require libyuv
+        if(avctx->pix_fmt == AV_PIX_FMT_YUV420P10LE || avctx->pix_fmt == AV_PIX_FMT_YUV444P || \
+                ((avctx->width > 3840 || avctx->height > 2160) && \
+                        (avctx->pix_fmt == AV_PIX_FMT_YUV420P || avctx->pix_fmt == AV_PIX_FMT_YUV422P))){
+            rk_context->libyuv = 1;
+        } else {
+            rk_context->libyuv = 0;
+        }
+    }
+
+    if(rk_context->libyuv){
+        av_log(avctx, AV_LOG_INFO, "Using partial libyuv soft conversion for %s (%dx%d)\n",
+                av_get_pix_fmt_name(avctx->pix_fmt), avctx->width, avctx->height);
+    }
+
+    // disable NV15->P010 conversion by default it causes to much latency
+    if(rk_context->drm_hdrbits == -1)
+        rk_context->drm_hdrbits = rk_context->fbc == RKMPP_FBC_DRM ? 10 : 8;
+
+    if(rk_context->fbc == RKMPP_FBC_DRM && rk_context->drm_hdrbits != 10){
+        av_log(avctx, AV_LOG_ERROR, "FBC drm mode is only available with drmhdrbits=10");
+        return AVERROR_UNKNOWN;
+    }
+
+    rk_context->timing = 0;
+    return 0;
+}
+
+int rkmpp_init_decoder(AVCodecContext *avctx){
+    RKMPPCodecContext *rk_context = avctx->priv_data;
     MppCompat *compatItem = NULL;
     char *env;
     int ret;
@@ -109,6 +156,7 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
             avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
     }
 
+    rk_context->drm_hdrbits = -1;
     env = getenv("FFMPEG_RKMPP_DRMHDRBITS");
     if (env != NULL){
         if(!strcmp("8", env))
@@ -118,39 +166,53 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
         else if(!strcmp("16", env))
             rk_context->drm_hdrbits = 16;
         else {
-            av_log(avctx, AV_LOG_ERROR, "unknown drmhdrbits value, valid values are 8: NV12, 10: NV15, 16:p010, default is 16\n");
+            av_log(avctx, AV_LOG_ERROR, "unknown DRMHDRBITS value, valid values are 8: NV12, 10: NV15, 16:p010\n");
             return AVERROR_UNKNOWN;
         }
-    } else
-        rk_context->drm_hdrbits = 16;
-
-    env = getenv("FFMPEG_RKMPP_AFBC");
-    if (env != NULL){
-        // https://github.com/rockchip-linux/mpp/issues/453?#issuecomment-1776324884
-        if(rkmpp_get_codingtype(avctx) == MPP_VIDEO_CodingAV1)
-            ret = 0;
-        else
-            ret = rk_context->mpi->control(rk_context->ctx, MPP_DEC_SET_OUTPUT_FORMAT, &afbc);
-        if (ret) {
-            av_log(avctx, AV_LOG_ERROR, "can not set afbc format");
-            return AVERROR_UNKNOWN;
-        } else
-            rk_context->fbc = 1;
     }
 
+    rk_context->fbc = -1;
+    env = getenv("FFMPEG_RKMPP_AFBC");
+    if (env != NULL){
+        if(!strcmp("decoder", env))
+            rk_context->fbc = RKMPP_FBC_DECODER;
+        else if(!strcmp("drm", env))
+            rk_context->fbc = RKMPP_FBC_DRM;
+        else if(!strcmp("none", env))
+            rk_context->fbc = RKMPP_FBC_NONE;
+        else {
+            av_log(avctx, AV_LOG_ERROR, "unknown AFBC value, valid values are none,decoder,drm\n");
+            return AVERROR_UNKNOWN;
+        }
+    }
+
+    rk_context->libyuv = -1;
     env = getenv("FFMPEG_RKMPP_LIBYUV");
-    if(avctx->pix_fmt == AV_PIX_FMT_YUV420P10LE || avctx->pix_fmt == AV_PIX_FMT_YUV444P || \
-            ((avctx->width > 3840 || avctx->height > 2160 || env != NULL) && \
-            (avctx->pix_fmt == AV_PIX_FMT_YUV420P || \
-             avctx->pix_fmt == AV_PIX_FMT_YUV422P))){
-        rk_context->libyuv = 1;
-        av_log(avctx, AV_LOG_INFO, "Using partial libyuv soft conversion for %s (%dx%d)\n",
-                av_get_pix_fmt_name(avctx->pix_fmt), avctx->width, avctx->height);
+    if (env != NULL){
+        if(!strcmp("1", env))
+            rk_context->libyuv = 1;
+        else if(!strcmp("0", env))
+            rk_context->libyuv = 0;
+        else {
+            av_log(avctx, AV_LOG_ERROR, "unknown libyuv value, valid values are 0,1\n");
+            return AVERROR_UNKNOWN;
+        }
     }
 
     env = getenv("FFMPEG_RKMPP_TIMING");
-    if (env != NULL)
-        rk_context->timing = !!atoi(env);
+    if (env != NULL){
+        if(!strcmp("1", env))
+            rk_context->timing = 1;
+        else if(!strcmp("0", env))
+            rk_context->timing = 0;
+        else {
+            av_log(avctx, AV_LOG_ERROR, "unknown timing value, valid values are 0,1\n");
+            return AVERROR_UNKNOWN;
+        }
+    }
+
+    if(rkmpp_dec_defaults(avctx))
+        return AVERROR_UNKNOWN;
 
     return 0;
 }
@@ -163,33 +225,45 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
 
     if(rk_context->fbc && !isfbc){
         av_log(avctx, AV_LOG_WARNING, "AFBC mode is requested but decoder does not support it, not using AFBC\n");
-        rk_context->fbc = 0;
+        rk_context->fbc = RKMPP_FBC_NONE;
     }
 
     rkmpp_get_mpp_format(&rk_context->informat, mpp_format, avctx->width, avctx->height, 0,
             mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), mpp_frame_get_offset_y(mppframe),
-            mpp_frame_get_buf_size(mppframe), isfbc, 0);
+            mpp_frame_get_buf_size(mppframe), mpp_frame_get_fbc_hdr_stride(mppframe), 0);
 
     // determine the decoding flow
     if(rk_context->hascfg)
         return AVERROR(EAGAIN);
     else if (avctx->pix_fmt == AV_PIX_FMT_DRM_PRIME){
         AVHWFramesContext *hwframes;
-        if(rk_context->informat.av == AV_PIX_FMT_NV15){
-            if(rk_context->drm_hdrbits == 16) // P010
-                rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_P010LE,
-                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
-            else if (rk_context->drm_hdrbits == 8) // NV12
-                rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_NV12,
-                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
-            rk_context->codec_flow = CONVERT;
-        }
-        if(!rk_context->outformat.numplanes){
+
+        if(rk_context->fbc == RKMPP_FBC_DRM){ // directly use the FBC output
             rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
                     avctx->width, avctx->height, 0,
                     mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
-                    mpp_frame_get_buf_size(mppframe), 0, 0);
+                    mpp_frame_get_buf_size(mppframe), mpp_frame_get_fbc_hdr_stride(mppframe), 0);
             rk_context->codec_flow = NOCONVERSION;
+        } else {
+            if(rk_context->informat.av == AV_PIX_FMT_NV15){ // convert to requested format
+                if(rk_context->drm_hdrbits == 16) // P010
+                    rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_P010LE,
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+                else if (rk_context->drm_hdrbits == 8) // NV12
+                    rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_NV12,
+                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+                rk_context->codec_flow = CONVERT;
+            } else if (rk_context->fbc == RKMPP_FBC_DECODER){
+                rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
+                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+                rk_context->codec_flow = CONVERT;
+            }else {
+                rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
+                        avctx->width, avctx->height, 0,
+                        mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
+                        mpp_frame_get_buf_size(mppframe), 0, 0);
+                rk_context->codec_flow = NOCONVERSION;
+            }
         }
         hwframes = (AVHWFramesContext*)rk_context->hwframes_ref->data;
         hwframes->format = AV_PIX_FMT_DRM_PRIME;
@@ -216,11 +290,11 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
             rkmpp_get_av_format(&rk_context->swapformat, AV_PIX_FMT_NV12,
                     avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
             rk_context->codec_flow = SWAPANDCONVERT;
-        } else if (rk_context->informat.fbc && rk_context->libyuv){ // libyuv needs uncompressed Y plane
+        } else if (rk_context->informat.fbcstride && rk_context->libyuv){ // libyuv needs uncompressed Y plane
             rkmpp_get_av_format(&rk_context->swapformat, rk_context->informat.av,
                             avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
             rk_context->codec_flow = SWAPANDCONVERT;
-        } else if (rk_context->informat.fbc && // rga2 can not afbc
+        } else if (rk_context->informat.fbcstride && // rga2 can not afbc
                 (avctx->pix_fmt == AV_PIX_FMT_YUV420P || avctx->pix_fmt == AV_PIX_FMT_YUV422P || avctx->pix_fmt == AV_PIX_FMT_YUV444P)){
             rkmpp_get_av_format(&rk_context->swapformat, rk_context->informat.av,
                             avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
@@ -239,7 +313,7 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
                             rk_context->libyuv ? &rk_context->informat.factors[1] : 0);
         }
 
-    } else if (rk_context->informat.fbc) {
+    } else if (rk_context->informat.fbcstride) {
         rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
                 avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
         rk_context->codec_flow = CONVERT;
@@ -430,7 +504,7 @@ static int rkmpp_get_frame(AVCodecContext *avctx, AVFrame *frame){
         desc->nb_layers = 1;
         layer = &desc->layers[0];
 
-        if(outitem->format->fbc){
+        if(outitem->format->fbcstride){
             layer->format = outitem->format->drm_fbc;
             layer->nb_planes = 1;
             layer->planes[0].object_index = 0;

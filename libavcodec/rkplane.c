@@ -57,15 +57,15 @@ static rkformat rkformats[16] = {
                 .numplanes = 1, .qual = 1, .factors[0] = { .width = 2}},
         { .av = AV_PIX_FMT_NV12, .mpp = MPP_FMT_YUV420SP, .drm = DRM_FORMAT_NV12, .drm_fbc=DRM_FORMAT_YUV420_8BIT, .rga = RK_FORMAT_YCbCr_420_SP,
                 .numplanes = 2, .factors[1] = { .height_div = 2}},
-        { .av = AV_PIX_FMT_NV15, .mpp = MPP_FMT_YUV420SP_10BIT, .drm = DRM_FORMAT_NV15, .rga = RK_FORMAT_YCbCr_420_SP_10B,
+        { .av = AV_PIX_FMT_NV15, .mpp = MPP_FMT_YUV420SP_10BIT, .drm = DRM_FORMAT_NV15, .drm_fbc=DRM_FORMAT_YUV420_10BIT, .rga = RK_FORMAT_YCbCr_420_SP_10B,
                 .numplanes = 2, .qual = 10, .bpp = 5, .bpp_div = 4, .factors[1] = { .height_div = 2}},
         { .av = AV_PIX_FMT_P010LE, .mpp = MPP_FMT_BUTT, .drm = DRM_FORMAT_P010, .rga = RK_FORMAT_YCbCr_420_SP_10B,
                 .numplanes = 2, .qual = 10, .bpp = 2, .factors[1] = { .height_div = 2}, .rga_uncompact = 1, .rga_msb_aligned = 1},
         { .av = AV_PIX_FMT_YUV420P, .mpp = MPP_FMT_YUV420P, .drm = DRM_FORMAT_YUV420, .rga = RK_FORMAT_YCbCr_420_P,
                 .numplanes = 3, .factors[1] = { .width_div = 2, .height_div = 2, .hstride_div=2}},
-        { .av = AV_PIX_FMT_YUV420P10LE, .mpp = MPP_FMT_BUTT, .drm = DRM_FORMAT_YUV420_10BIT, .rga = RK_FORMAT_UNKNOWN,
+        { .av = AV_PIX_FMT_YUV420P10LE, .mpp = MPP_FMT_BUTT, .drm = DRM_FORMAT_P010, .rga = RK_FORMAT_UNKNOWN,
                 .numplanes = 3, .qual = 10, .bpp = 2, .factors[1] = { .width_div = 2, .height_div = 2, .hstride_div=2}},
-        { .av = AV_PIX_FMT_NV16, .mpp = MPP_FMT_YUV422SP, .drm = DRM_FORMAT_NV16, .rga = RK_FORMAT_YCbCr_422_SP,
+        { .av = AV_PIX_FMT_NV16, .mpp = MPP_FMT_YUV422SP, .drm = DRM_FORMAT_NV16, .drm_fbc=DRM_FORMAT_YUV420_8BIT, .rga = RK_FORMAT_YCbCr_422_SP,
                 .numplanes = 2, .qual = 1,},
         { .av = AV_PIX_FMT_YUV422P, .mpp = MPP_FMT_YUV422P, .drm = DRM_FORMAT_YUV422, .rga = RK_FORMAT_YCbCr_422_P,
                 .numplanes = 3, .qual = 1, .factors[1] = { .hstride_div = 2}},
@@ -77,10 +77,10 @@ static rkformat rkformats[16] = {
 
 #define GETFORMAT(NAME, TYPE)\
 int rkmpp_get_##NAME##_format(rkformat *format, TYPE informat, int width, int height, int align,\
-        int hstride, int vstride, int ypixoffset, int overshoot, int fbc, factor* uvfactor){ \
+        int hstride, int vstride, int ypixoffset, int overshoot, int fbcstride, factor* uvfactor){ \
     for(int i=0; i < FF_ARRAY_ELEMS(rkformats); i++){ \
         if(rkformats[i].NAME == informat){ \
-            rkmpp_planedata(&rkformats[i], width, height, align, hstride, vstride, ypixoffset, overshoot, fbc, uvfactor); \
+            rkmpp_planedata(&rkformats[i], width, height, align, hstride, vstride, ypixoffset, overshoot, fbcstride, uvfactor); \
             format->av = rkformats[i].av;\
             format->mpp = rkformats[i].mpp;\
             format->drm = rkformats[i].drm;\
@@ -93,7 +93,7 @@ int rkmpp_get_##NAME##_format(rkformat *format, TYPE informat, int width, int he
             format->qual = rkformats[i].qual;\
             format->rga_uncompact = rkformats[i].rga_uncompact;\
             format->rga_msb_aligned = rkformats[i].rga_msb_aligned;\
-            format->fbc = fbc;\
+            format->fbcstride = fbcstride;\
             format->ypixoffset = ypixoffset;\
             memcpy(format->factors, rkformats[i].factors, sizeof(rkformats[i].factors));\
             return 0;\
@@ -124,7 +124,7 @@ static int rkmpp_scale_fract(int val, int fract1, int fract1_div,
 }
 
 void rkmpp_planedata(rkformat *format, int width, int height, int align, int hstride, int vstride,
-        int ypixoffset, int overshoot, int fbc, factor* planar_uvfactor){
+        int ypixoffset, int overshoot, int fbcstride, factor* planar_uvfactor){
     planedata *planedata = &format->planedata;
     factor *factors = format->factors;
     int size, totalsize=0;
@@ -147,10 +147,12 @@ void rkmpp_planedata(rkformat *format, int width, int height, int align, int hst
     else
         planedata->vstride = FFALIGN(height + ypixoffset, align);
 
-    // rga works this way, i don't really get the logic :/
-    if(format->numplanes == 1 || (format->av == AV_PIX_FMT_NV15 && fbc)){
-        planedata->hstride_pix = FFALIGN(width, 2);
-        planedata->vstride_pix = FFALIGN(height + ypixoffset, 2);
+    if(fbcstride){
+        planedata->hstride_pix = fbcstride;
+        planedata->vstride_pix = FFALIGN(height + ypixoffset, 16);
+    } else if(format->numplanes == 1){
+        planedata->hstride_pix = FFALIGN(width, 8);
+        planedata->vstride_pix = FFALIGN(height + ypixoffset, 8);
     } else {
         planedata->hstride_pix = planedata->hstride;
         planedata->vstride_pix = planedata->vstride;
@@ -327,7 +329,7 @@ static int rkmpp_rga_scale(uint64_t src_fd, uint16_t src_width, uint16_t src_hei
             informat->planedata.hstride_pix, informat->planedata.vstride_pix, informat->rga);
     src.is_10b_compact = informat->rga_uncompact;
     src.is_10b_endian = informat->rga_msb_aligned;
-    src.rd_mode = informat->fbc ? IM_FBC_MODE : IM_RASTER_MODE;
+    src.rd_mode = informat->fbcstride ? IM_FBC_MODE : IM_RASTER_MODE;
 
     dst.fd = dst_fd;
     dst.mmuFlag = 1;
@@ -339,7 +341,7 @@ static int rkmpp_rga_scale(uint64_t src_fd, uint16_t src_width, uint16_t src_hei
     dst.sync_mode = RGA_BLIT_ASYNC;
     dst.in_fence_fd = -1;
     dst.out_fence_fd = *outfence ? *outfence : -1;
-    dst.rd_mode = outformat->fbc ? IM_FBC_MODE : IM_RASTER_MODE;
+    dst.rd_mode = outformat->fbcstride ? IM_FBC_MODE : IM_RASTER_MODE;
 
     if(src.is_10b_compact || dst.is_10b_compact)
         dst.core = IM_SCHEDULER_RGA3_CORE0 | IM_SCHEDULER_RGA3_CORE1;
