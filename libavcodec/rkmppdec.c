@@ -248,16 +248,22 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
             if(rk_context->informat.av == AV_PIX_FMT_NV15){ // convert to requested format
                 if(rk_context->drm_hdrbits == 16) // P010
                     rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_P010LE,
-                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+                            avctx->width, avctx->height, RKMPP_DRM_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
                 else if (rk_context->drm_hdrbits == 8) // NV12
                     rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_NV12,
-                            avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+                            avctx->width, avctx->height, RKMPP_DRM_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
                 rk_context->codec_flow = CONVERT;
             } else if (rk_context->fbc == RKMPP_FBC_DECODER){
                 rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
-                        avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+                        avctx->width, avctx->height, RKMPP_DRM_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
                 rk_context->codec_flow = CONVERT;
-            }else {
+            } else if (mpp_frame_get_hor_stride(mppframe) != FFALIGN(avctx->width, RKMPP_DRM_STRIDE_ALIGN)){
+                // drm prime frame strides must be 64 aligned when imported thorugh EGL,
+                // in this case we must realign
+                rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
+                        avctx->width, avctx->height, RKMPP_DRM_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+                rk_context->codec_flow = CONVERT;
+            } else {
                 rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
                         avctx->width, avctx->height, 0,
                         mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
