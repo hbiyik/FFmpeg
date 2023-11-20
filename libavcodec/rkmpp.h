@@ -27,6 +27,7 @@
 
 #define RKMPP_STRIDE_ALIGN 16
 #define RKMPP_DRM_STRIDE_ALIGN 64
+#define RKMPP_DIM_ALIGN 2
 #define RKMPP_RGA_MIN_SIZE 128
 #define RKMPP_RGA_MAX_SIZE 4096
 #define HDR_SIZE 1024
@@ -60,9 +61,18 @@ uint64_t rkmpp_update_latency(AVCodecContext *avctx, int latency);
 MPP_RET rkmpp_buffer_alloc(AVCodecContext *avctx, size_t size, MppBufferGroup *buffer_group, int count);
 
 #define OFFSET(x) offsetof(RKMPPCodecContext, x)
+#define VD AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_DECODING_PARAM
 #define VE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM
+#define VDE AV_OPT_FLAG_VIDEO_PARAM | AV_OPT_FLAG_ENCODING_PARAM | AV_OPT_FLAG_DECODING_PARAM
+
+#define COMMONOPTS() \
+    { "width", "scale to Width", OFFSET(rga_width), AV_OPT_TYPE_INT, \
+             { .i64=0 }, 0, RKMPP_RGA_MAX_SIZE, VDE, "width"}, \
+    { "height", "scale to Height", OFFSET(rga_height), AV_OPT_TYPE_INT, \
+             { .i64=0 }, 0, RKMPP_RGA_MAX_SIZE, VDE, "height"},
 
 #define ENCODEROPTS() \
+    COMMONOPTS() \
     { "rc_mode", "Set rate control mode", OFFSET(rc_mode), AV_OPT_TYPE_INT, \
             { .i64 = MPP_ENC_RC_MODE_CBR }, MPP_ENC_RC_MODE_VBR, MPP_ENC_RC_MODE_BUTT, VE, "rc_mode"}, \
         {"VBR", NULL, 0, AV_OPT_TYPE_CONST, { .i64 = MPP_ENC_RC_MODE_VBR }, 0, 0, VE, "rc_mode" }, \
@@ -73,10 +83,6 @@ MPP_RET rkmpp_buffer_alloc(AVCodecContext *avctx, size_t size, MppBufferGroup *b
         { .i64=50 }, 0, 100, VE, "qmin"}, \
     { "quality_max", "Maximum Quality", OFFSET(qmax), AV_OPT_TYPE_INT, \
             { .i64=100 }, 0, 100, VE, "qmax"}, \
-    { "width", "scale to Width", OFFSET(postrga_width), AV_OPT_TYPE_INT, \
-             { .i64=0 }, 0, RKMPP_RGA_MAX_SIZE, VE, "width"}, \
-    { "height", "scale to Height", OFFSET(postrga_height), AV_OPT_TYPE_INT, \
-             { .i64=0 }, 0, RKMPP_RGA_MAX_SIZE, VE, "height"},
 
 static const AVOption options_h264_encoder[] = {
     ENCODEROPTS()
@@ -142,6 +148,7 @@ static const AVOption options_vp8_encoder[] = {
 
 #define DECODEROPTIONS(NAME, TYPE) \
 static const AVOption options_##NAME##_##TYPE[] = { \
+            COMMONOPTS() \
             { NULL } \
         };
 

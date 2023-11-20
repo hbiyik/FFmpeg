@@ -290,3 +290,13 @@ int rkmpp_fifo_pop(MppFrameFifo* fifo){
     fifo->used--;
     return 0;
 }
+
+int rkmpp_check_rga_dimensions(RKMPPCodecContext *rk_context){
+    if(rk_context->rga_width < RKMPP_RGA_MIN_SIZE ||
+            rk_context->rga_width > RKMPP_RGA_MAX_SIZE ||
+            rk_context->rga_height < RKMPP_RGA_MIN_SIZE ||
+            rk_context->rga_height > RKMPP_RGA_MAX_SIZE){
+        return -1;
+    }
+   return 0;
+}

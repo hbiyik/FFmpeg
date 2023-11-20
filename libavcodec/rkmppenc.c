@@ -30,31 +30,28 @@ static int prepare_rga(AVCodecContext *avctx, rkformat* informat){
             (coding_type == MPP_VIDEO_CodingVP8 && (informat->av == AV_PIX_FMT_NV16 || informat->av == AV_PIX_FMT_YUV422P))){
         rkmpp_get_av_format(&rk_context->outformat, AV_PIX_FMT_BGR0,
                 informat->planedata.width, informat->planedata.height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
-        if(!rk_context->postrga_width)
-            rk_context->postrga_width = informat->planedata.width;
-        if(!rk_context->postrga_height)
-            rk_context->postrga_height = informat->planedata.height;
+        if(!rk_context->rga_width)
+            rk_context->rga_width = informat->planedata.width;
+        if(!rk_context->rga_height)
+            rk_context->rga_height = informat->planedata.height;
     }
 
-    if(rk_context->postrga_width || rk_context->postrga_height){
+    if(rk_context->rga_width || rk_context->rga_height){
         if(informat->av == AV_PIX_FMT_NV24 || informat->av == AV_PIX_FMT_YUV444P){
             av_log(avctx, AV_LOG_ERROR, "Scaling is not supported for format %s.\n",
                     av_get_pix_fmt_name(informat->av));
             return -1;
         }
 
-        if(rk_context->postrga_width < RKMPP_RGA_MIN_SIZE ||
-                rk_context->postrga_width > RKMPP_RGA_MAX_SIZE ||
-                rk_context->postrga_height < RKMPP_RGA_MIN_SIZE ||
-                rk_context->postrga_height > RKMPP_RGA_MAX_SIZE){
+        if(rkmpp_check_rga_dimensions(rk_context)){
             av_log(avctx, AV_LOG_ERROR, "Scaling is not in between %d and %d.\n", RKMPP_RGA_MIN_SIZE, RKMPP_RGA_MAX_SIZE);
             return -2;
         }
-        avctx->width = rk_context->postrga_width;
-        avctx->height = rk_context->postrga_height;
+        avctx->width = rk_context->rga_width;
+        avctx->height = rk_context->rga_height;
         if(rk_context->outformat.numplanes == 0) // if not previously set by the VP8 RGBA hack
             rkmpp_get_av_format(&rk_context->outformat, informat->av,
-                    rk_context->postrga_width, rk_context->postrga_height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+                    rk_context->rga_width, rk_context->rga_height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
     }
 
     return 0;

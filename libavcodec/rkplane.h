@@ -130,8 +130,8 @@ typedef struct {
     int level;
     int coder;
     int dct8x8;
-    int postrga_width;
-    int postrga_height;
+    int rga_width;
+    int rga_height;
     rkformat informat;
     rkformat swapformat;
     rkformat outformat;
@@ -171,3 +171,4 @@ int rkmpp_fifo_push(MppFrameFifo* fifo, MppFrameItem* item);
 int rkmpp_fifo_pop(MppFrameFifo* fifo);
 int rkmpp_fifo_isfull(MppFrameFifo* fifo);
 int rkmpp_fifo_isempty(MppFrameFifo* fifo);
+int rkmpp_check_rga_dimensions(RKMPPCodecContext *rk_context);

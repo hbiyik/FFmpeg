@@ -90,7 +90,28 @@ static int rkmpp_dec_defaults(AVCodecContext *avctx){
         return AVERROR_UNKNOWN;
     }
 
-    rk_context->timing = 0;
+    if(rk_context->rga_height || rk_context->rga_height){
+        if(rk_context->libyuv){
+            av_log(avctx, AV_LOG_ERROR, "Scaling is not supported in libyuv mode\n");
+            return AVERROR_UNKNOWN;
+        }
+        if(rk_context->fbc == RKMPP_FBC_DRM){
+            av_log(avctx, AV_LOG_ERROR, "Scaling is not supported in drm fbc mode\n");
+            return AVERROR_UNKNOWN;
+        }
+
+        if(rkmpp_check_rga_dimensions(rk_context)){
+            av_log(avctx, AV_LOG_ERROR, "Scaling is not in between %d and %d.\n", RKMPP_RGA_MIN_SIZE, RKMPP_RGA_MAX_SIZE);
+            return AVERROR_UNKNOWN;
+        }
+
+        avctx->width = FFALIGN(rk_context->rga_width, RKMPP_DIM_ALIGN);
+        avctx->height = FFALIGN(rk_context->rga_height, RKMPP_DIM_ALIGN);
+    }
+
+    avctx->coded_width = FFALIGN(avctx->width, 64);
+    avctx->coded_height = FFALIGN(avctx->height, 64);
+
     return 0;
 }
 
@@ -99,9 +120,6 @@ int rkmpp_init_decoder(AVCodecContext *avctx){
     MppCompat *compatItem = NULL;
     char *env;
     int ret;
-
-    avctx->coded_width = FFALIGN(avctx->width, 64);
-    avctx->coded_height = FFALIGN(avctx->height, 64);
 
     ret = rk_context->mpi->control(rk_context->ctx, MPP_DEC_SET_DISABLE_ERROR, NULL) == MPP_OK;
     if (ret < 0) {
@@ -228,7 +246,7 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
         rk_context->fbc = RKMPP_FBC_NONE;
     }
 
-    rkmpp_get_mpp_format(&rk_context->informat, mpp_format, avctx->width, avctx->height, 0,
+    rkmpp_get_mpp_format(&rk_context->informat, mpp_format, mpp_frame_get_width(mppframe), mpp_frame_get_height(mppframe), 0,
             mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), mpp_frame_get_offset_y(mppframe),
             mpp_frame_get_buf_size(mppframe), mpp_frame_get_fbc_hdr_stride(mppframe), 0);
 
@@ -240,7 +258,7 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
 
         if(rk_context->fbc == RKMPP_FBC_DRM){ // directly use the FBC output
             rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
-                    avctx->width, avctx->height, 0,
+                    mpp_frame_get_width(mppframe), mpp_frame_get_height(mppframe), 0,
                     mpp_frame_get_hor_stride(mppframe), mpp_frame_get_ver_stride(mppframe), 0,
                     mpp_frame_get_buf_size(mppframe), mpp_frame_get_fbc_hdr_stride(mppframe), 0);
             rk_context->codec_flow = NOCONVERSION;
@@ -254,12 +272,18 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
                             avctx->width, avctx->height, RKMPP_DRM_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
                 rk_context->codec_flow = CONVERT;
             } else if (rk_context->fbc == RKMPP_FBC_DECODER){
+                // mpp is spitting FBC, in this mode we convert to un FBC frames with RGA
                 rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
                         avctx->width, avctx->height, RKMPP_DRM_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
                 rk_context->codec_flow = CONVERT;
             } else if (mpp_frame_get_hor_stride(mppframe) != FFALIGN(avctx->width, RKMPP_DRM_STRIDE_ALIGN)){
                 // drm prime frame strides must be 64 aligned when imported thorugh EGL,
                 // in this case we must realign
+                rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
+                        avctx->width, avctx->height, RKMPP_DRM_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+                rk_context->codec_flow = CONVERT;
+            } else if(rk_context->rga_width || rk_context->rga_height){
+                // scaling is requested
                 rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
                         avctx->width, avctx->height, RKMPP_DRM_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
                 rk_context->codec_flow = CONVERT;
@@ -320,6 +344,11 @@ static int rkmpp_config_decoder(AVCodecContext *avctx, MppFrame mppframe){
         }
 
     } else if (rk_context->informat.fbcstride) {
+        rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
+                avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
+        rk_context->codec_flow = CONVERT;
+    } else if (rk_context->rga_height || rk_context->rga_width) {
+        // scaling is requested
         rkmpp_get_av_format(&rk_context->outformat, rk_context->informat.av,
                 avctx->width, avctx->height, RKMPP_STRIDE_ALIGN, 0, 0, 0, 0, 0, 0);
         rk_context->codec_flow = CONVERT;
