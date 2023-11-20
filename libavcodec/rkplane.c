@@ -35,6 +35,7 @@
 
 #include <poll.h>
 #include <fcntl.h>
+#include <linux/dma-buf.h>
 #include "rkplane.h"
 #include "libyuv/planar_functions.h"
 #include "libyuv/scale_uv.h"
@@ -296,10 +297,14 @@ int rkmpp_rga_wait(MppFrameItem* item, int timeout, struct timespec* ts){
     do {
         ret = poll(&fds, 1, timeout);
         if (ret > 0) {
+            struct dma_buf_sync sync = { DMA_BUF_SYNC_START | DMA_BUF_SYNC_READ};
             if (fds.revents & (POLLERR | POLLNVAL)) {
                 errno = EINVAL;
                 return AVERROR(EAGAIN);
             }
+            // if RGA is faster the DMA, we should wait DMA to sync
+            if(ioctl(mpp_buffer_get_fd(mpp_frame_get_buffer(item->mppframe)), DMA_BUF_IOCTL_SYNC, &sync))
+                return AVERROR(EAGAIN);
             close(item->rgafence);
             return 0;
         } else if (ret == 0) {
