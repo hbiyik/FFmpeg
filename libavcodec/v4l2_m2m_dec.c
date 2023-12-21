@@ -190,11 +190,22 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
     V4L2Context *capture, *output;
     V4L2m2mContext *s;
     V4L2m2mPriv *priv = avctx->priv_data;
+    enum AVPixelFormat givenfmt = avctx->pix_fmt;
     int ret;
 
     ret = ff_v4l2_m2m_create_context(priv, &s);
     if (ret < 0)
         return ret;
+
+    // check if given format is supported
+    avctx->pix_fmt = AV_PIX_FMT_NONE;
+    for (int n = 0; avctx->codec->pix_fmts[n] != AV_PIX_FMT_NONE; n++){
+        if(givenfmt == avctx->codec->pix_fmts[n])
+            avctx->pix_fmt = avctx->codec->pix_fmts[n];
+    }
+    // if not auto select
+    if (avctx->pix_fmt == AV_PIX_FMT_NONE)
+        avctx->pix_fmt = ff_get_format(avctx, avctx->codec->pix_fmts);
 
     capture = &s->capture;
     output = &s->output;
@@ -218,7 +229,7 @@ static av_cold int v4l2_decode_init(AVCodecContext *avctx)
      *   - the DRM frame format is passed in the DRM frame descriptor layer.
      *       check the v4l2_get_drm_frame function.
      */
-    switch (ff_get_format(avctx, avctx->codec->pix_fmts)) {
+    switch (avctx->pix_fmt) {
     case AV_PIX_FMT_DRM_PRIME:
         s->output_drm = 1;
         break;
