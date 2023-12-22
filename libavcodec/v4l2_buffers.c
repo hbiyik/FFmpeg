@@ -657,7 +657,10 @@ int ff_v4l2_buffer_initialize(V4L2Buffer* avbuf, int index)
     }
 
     if (V4L2_TYPE_IS_MULTIPLANAR(ctx->type)) {
-        avbuf->buf.length = VIDEO_MAX_PLANES;
+        if(V4L2_TYPE_IS_OUTPUT(ctx->type))
+            avbuf->buf.length = ctx->type == 1;
+        else
+            avbuf->buf.length = ctx->format.fmt.pix_mp.num_planes;
         avbuf->buf.m.planes = avbuf->planes;
     }
 
