@@ -222,16 +222,16 @@ static int drm_frames_get_constraints(AVHWDeviceContext *hwdev,
 }
 
 static void free_drm_frame_descriptor(AVDRMDeviceContext *hwctx,
-                                      AVDRMFrameDescriptor *desc)
+                                      AVDRMCompatibleFrameDescriptor *desc)
 {
     int i;
     if (!desc)
         return;
 
-    for (i = 0; i < desc->nb_objects; i++) {
-        AVDRMObjectDescriptor *object = &desc->objects[i];
-        if (object->ptr)
-            drm_munmap(object->ptr, object->size);
+    for (i = 0; i < desc->drm_desc.nb_objects; i++) {
+        AVDRMObjectDescriptor *object = &desc->drm_desc.objects[i];
+        if (desc->opaque)
+            drm_munmap(desc->opaque, object->size);
         if (object->fd > 0) {
             int ret;
             uint32_t handle = 0;
@@ -265,7 +265,7 @@ static void drm_buffer_free(void *opaque, uint8_t *data)
 {
     AVHWFramesContext *hwfc = opaque;
     AVDRMDeviceContext *hwctx = hwfc->device_ctx->hwctx;
-    AVDRMFrameDescriptor *desc = (AVDRMFrameDescriptor *)data;
+    AVDRMCompatibleFrameDescriptor *desc = (AVDRMFrameDescriptor *)data;
 
     free_drm_frame_descriptor(hwctx, desc);
 }
@@ -275,7 +275,7 @@ static AVBufferRef *drm_pool_alloc(void *opaque, size_t size)
     int ret;
     AVHWFramesContext *hwfc = opaque;
     AVDRMDeviceContext *hwctx = hwfc->device_ctx->hwctx;
-    AVDRMFrameDescriptor *desc;
+    AVDRMCompatibleFrameDescriptor *desc;
     AVDRMLayerDescriptor *layer;
     AVBufferRef *ref;
 
@@ -301,10 +301,10 @@ static AVBufferRef *drm_pool_alloc(void *opaque, size_t size)
     }
     av_assert0(dmcb.size >= dmcb.width * dmcb.height * dmcb.bpp / 8);
 
-    desc->nb_objects = 1;
-    desc->nb_layers = 1;
+    desc->drm_desc.nb_objects = 1;
+    desc->drm_desc.nb_layers = 1;
     ret = drmPrimeHandleToFD(hwctx->fd, dmcb.handle, DRM_CLOEXEC | DRM_RDWR,
-                             &desc->objects[0].fd);
+                             &desc->drm_desc.objects[0].fd);
     if (ret) {
         av_log(hwfc, AV_LOG_ERROR, "Failed to convert handle to fd: %m\n");
         goto fail;
@@ -319,16 +319,16 @@ static AVBufferRef *drm_pool_alloc(void *opaque, size_t size)
     }
 
     // default read and write
-    desc->objects[0].ptr = drm_mmap(NULL, dmcb.size, PROT_READ | PROT_WRITE,
+    desc->opaque = drm_mmap(NULL, dmcb.size, PROT_READ | PROT_WRITE,
                                     MAP_SHARED, hwctx->fd, dmmd.offset);
-    if (desc->objects[0].ptr == MAP_FAILED) {
+    if (desc->opaque== MAP_FAILED) {
         av_log(hwfc, AV_LOG_ERROR, "Failed to drm_mmap: %m\n");
         goto fail;
     }
 
-    desc->objects[0].size = dmcb.size;
+    desc->drm_desc.objects[0].size = dmcb.size;
 
-    layer = &desc->layers[0];
+    layer = &desc->drm_desc.layers[0];
     for (i = 0; i < FF_ARRAY_ELEMS(supported_formats); i++) {
         if (supported_formats[i].pixfmt == hwfc->sw_format) {
             layer->format = supported_formats[i].drm_format;

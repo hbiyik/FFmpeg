@@ -46,12 +46,6 @@ typedef struct AVDRMObjectDescriptor {
      */
     int fd;
     /**
-     * DRM PRIME mapped virtual ptr for above fd.
-     *
-     * The content of this buffer must be readonly when acting decoder's out buffer.
-     */
-    void *ptr;
-    /**
      * Total size of the object.
      *
      * (This includes any parts not which do not contain image data.)
@@ -152,6 +146,23 @@ typedef struct AVDRMFrameDescriptor {
      */
     AVDRMLayerDescriptor layers[AV_DRM_MAX_PLANES];
 } AVDRMFrameDescriptor;
+
+/**
+ * DRM Compatible frame descriptor.
+ *
+ */
+typedef struct AVDRMCompatibleFrameDescriptor {
+    /**
+     * Backwards compatibility with AVDRMFrameDescriptor.
+     */
+    AVDRMFrameDescriptor drm_desc;
+
+    /**
+     * References to MppBuffer instances which are used
+     * on each drm frame index.
+     */
+    void* opaque;
+} AVDRMCompatibleFrameDescriptor;
 
 /**
  * DRM device.
