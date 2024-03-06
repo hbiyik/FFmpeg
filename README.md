@@ -1,46 +1,38 @@
-FFmpeg README
-=============
+# PLEASE USE https://github.com/nyanmisaka/ffmpeg-rockchip REPO INSTEAD.
 
-FFmpeg is a collection of libraries and tools to process multimedia content
-such as audio, video, subtitles and related metadata.
+# WHY?
 
-## Libraries
+Because the intention of this repo was to fix every shortcoming of rockchip VPU/Kernel/GPU software ecosystem in ffmpeg, even though it is not FFmpeg's responsibility.
 
-* `libavcodec` provides implementation of a wider range of codecs.
-* `libavformat` implements streaming protocols, container formats and basic I/O access.
-* `libavutil` includes hashers, decompressors and miscellaneous utility functions.
-* `libavfilter` provides means to alter decoded audio and video through a directed graph of connected filters.
-* `libavdevice` provides an abstraction to access capture and playback devices.
-* `libswresample` implements audio mixing and resampling routines.
-* `libswscale` implements color conversion and scaling routines.
+In this sense, by design, the work here has 0 respect of FFmpeg conventions, and targets to break/fork only ffmpeg instead of other sw components like mesa/librarga/mpv/kodi etc. 1 fork was better than 5 different forks.
 
-## Tools
+And it kinda worked. Espcially in this https://github.com/hbiyik/FFmpeg/tree/exp_refactor_all branch, there is a blazing fast decoder implementation of rockchip mpp.
 
-* [ffmpeg](https://ffmpeg.org/ffmpeg.html) is a command line toolbox to
-  manipulate, convert and stream multimedia content.
-* [ffplay](https://ffmpeg.org/ffplay.html) is a minimalistic multimedia player.
-* [ffprobe](https://ffmpeg.org/ffprobe.html) is a simple analysis tool to inspect
-  multimedia content.
-* Additional small tools such as `aviocat`, `ismindex` and `qt-faststart`.
+But note that, it is still a decoder in ffmpeg library but not a proper ffmpeg-decoder, a lot of hacky and wonky stuff exists there.
 
-## Documentation
+By time passes it served its purpose, and the maintenance burden became heavy since it is reinventing lots of existing wheels.
 
-The offline documentation is available in the **doc/** directory.
+# FFMPEG-ROCKCHIP
 
-The online documentation is available in the main [website](https://ffmpeg.org)
-and in the [wiki](https://trac.ffmpeg.org).
+https://github.com/nyanmisaka/ffmpeg-rockchip on the other hand is a clean ffmpeg decoder / encoder / rga filter implementation, equally fast if not faster as `exp_refactor_all` branch.
 
-### Examples
+To have a future proof implementation and combine the community effort including myself i suggest every interested party including myself to contribute to the new repo and new implementation at https://github.com/nyanmisaka/ffmpeg-rockchip
 
-Coding examples are available in the **doc/examples** directory.
+# WHATS HERE TO SEE
 
-## License
+I think there are very interesting experiments in several branches in this repo for future reference. Therefore, i am not deleting the repo, just archiving it for future reference.
 
-FFmpeg codebase is mainly LGPL-licensed with optional components licensed under
-GPL. Please refer to the LICENSE file for detailed information.
+# HONORABLE MENTION
 
-## Contributing
+If you are interested in technical gory details in rockchip VPUs rga silicon, this issue https://github.com/JeffyCN/FFmpeg/issues/18 has one of richest resource on the internet about that, excluding our rant during our painful development process.
 
-Patches should be submitted to the ffmpeg-devel mailing list using
-`git format-patch` or `git send-email`. Github pull requests should be
-avoided because they are not part of our review process and will be ignored.
+# SPECIAL THANKS
+
+@JeffyCN
+@rigaya
+@nyanmisaka
+@avafinger
+@kwankiu
+@kyak
+
+and lots of others...
