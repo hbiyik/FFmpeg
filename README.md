@@ -34,5 +34,6 @@ If you are interested in technical gory details in rockchip VPUs rga silicon, th
 @avafinger
 @kwankiu
 @kyak
+@hermanchen
 
 and lots of others...
